@@ -7,7 +7,7 @@ import pytest
 
 import megatron.megalens.core_adapter as core_adapter
 from megatron.core.observability import reset_trace_sink, scoped_forward, trace_scope
-from megatron.core.transformer.attention import Attention, CoreAttention
+from megatron.core.transformer.attention import Attention, CoreAttentionInterface
 from megatron.core.transformer.mlp import MLP
 from megatron.core.transformer.moe.moe_layer import MoELayer
 from megatron.core.transformer.moe.router import TopKRouter
@@ -24,7 +24,7 @@ def _reset_core_sink():
 
 def test_attention_probe_wraps_runtime_implementation_not_protocol() -> None:
     assert getattr(Attention.forward, "__megatron_trace_event__", None) == "attention"
-    assert getattr(CoreAttention.forward, "__megatron_trace_event__", None) is None
+    assert getattr(CoreAttentionInterface.forward, "__megatron_trace_event__", None) is None
 
 
 def test_mlp_and_moe_probe_markers_cover_the_runtime_methods() -> None:
@@ -121,3 +121,24 @@ def test_capture_query_tolerates_unsupported_torch_compatible_backend(monkeypatc
 
     monkeypatch.setattr(core_adapter, "_CUDA_CAPTURE_QUERY", lambda: True)
     assert core_adapter.should_suppress_core_scope()
+
+
+def test_paged_stash_reports_missing_triton_before_allocating(monkeypatch) -> None:
+    from megatron.core.transformer.moe import paged_stash
+
+    monkeypatch.setattr(paged_stash, "HAVE_TRITON", False)
+    monkeypatch.setattr(
+        paged_stash.torch,
+        "empty",
+        lambda *args, **kwargs: pytest.fail("missing Triton must fail before buffer allocation"),
+    )
+    with pytest.raises(ImportError, match="MoE paged stash requires Triton"):
+        paged_stash.PagedStashBuffer(
+            num_tokens=4,
+            hidden_size=8,
+            page_size=2,
+            device="cpu",
+            overflow=None,
+            host_spill=None,
+            dtype=None,
+        )

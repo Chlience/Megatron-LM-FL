@@ -53,11 +53,6 @@ def test_gpt_model_phase_scopes_match_the_source_call_boundaries() -> None:
         for node in gpt_class.body
         if isinstance(node, ast.FunctionDef) and node.name == "_postprocess"
     )
-    mtp_single_step = next(
-        node
-        for node in gpt_class.body
-        if isinstance(node, ast.FunctionDef) and node.name == "compute_mtp_single_step"
-    )
 
     decoder_scope = _literal_scope(forward, "decoder")
     assert decoder_scope.items[0].context_expr.keywords == []
@@ -88,7 +83,7 @@ def test_gpt_model_phase_scopes_match_the_source_call_boundaries() -> None:
     assert isinstance(postprocess_return.value, ast.Call)
     assert isinstance(postprocess_return.value.func, ast.Attribute)
     assert postprocess_return.value.func.attr == "_postprocess"
-    assert {"is_spec_decode", "mhc_multistream"} <= {
+    assert {"padding_mask", "output_processor", "output_processor_context", "mhc_multistream"} <= {
         keyword.arg for keyword in postprocess_return.value.keywords
     }
 
@@ -110,18 +105,7 @@ def test_gpt_model_phase_scopes_match_the_source_call_boundaries() -> None:
         and node.value.func.attr == "_scale_logits"
     )
     assert output_scope.end_lineno < scale_assignment.lineno
-    assert not any(
-        isinstance(node, ast.With)
-        and any(
-            isinstance(item.context_expr, ast.Call)
-            and _call_name(item.context_expr) == "trace_scope"
-            and item.context_expr.args
-            and isinstance(item.context_expr.args[0], ast.Constant)
-            and item.context_expr.args[0].value == "output_layer"
-            for item in node.items
-        )
-        for node in ast.walk(mtp_single_step)
-    )
+
 
 
 class _RecordingScope:
@@ -143,6 +127,7 @@ def _fake_forward_model(decoder, postprocess):
         config=SimpleNamespace(
             fine_grained_activation_offloading=False,
             moe_n_hash_layers=0,
+            moe_paged_stash=False,
         ),
         mtp_process=False,
         _preprocess=lambda **kwargs: (

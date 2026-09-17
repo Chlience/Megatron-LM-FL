@@ -91,6 +91,7 @@ def _phase_config(**overrides):
         "deallocate_pipeline_outputs": False,
         "num_moe_experts": None,
         "mtp_num_layers": None,
+        "high_priority_a2a_comm_stream": False,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -888,7 +889,7 @@ def test_combined_no_pipeline_schedule_records_both_operation_identities(monkeyp
     sink = _RecordingSink()
     install_trace_sink(sink)
     model = object()
-    monkeypatch.setattr(combined_1f1b, "set_streams", lambda: None)
+    monkeypatch.setattr(combined_1f1b, "set_streams", lambda **kwargs: None)
 
     def fake_combined_step(*args, **kwargs):
         del kwargs
@@ -905,7 +906,7 @@ def test_combined_no_pipeline_schedule_records_both_operation_identities(monkeyp
         input_tensor=None,
         output_tensor_grad=None,
         forward_data_store=[],
-        config=SimpleNamespace(),
+        config=SimpleNamespace(high_priority_a2a_comm_stream=False),
         collect_non_loss_data=False,
         first_val_step=None,
         forward_only=False,
@@ -942,7 +943,7 @@ def test_combined_no_pipeline_schedule_records_both_operation_identities(monkeyp
 
 
 def test_combined_schedule_null_sink_skips_identity_context(monkeypatch) -> None:
-    monkeypatch.setattr(combined_1f1b, "set_streams", lambda: None)
+    monkeypatch.setattr(combined_1f1b, "set_streams", lambda **kwargs: None)
     monkeypatch.setattr(
         combined_1f1b,
         "_build_combined_step_context",
@@ -962,7 +963,7 @@ def test_combined_schedule_null_sink_skips_identity_context(monkeypatch) -> None
         input_tensor=None,
         output_tensor_grad=None,
         forward_data_store=[],
-        config=SimpleNamespace(),
+        config=SimpleNamespace(high_priority_a2a_comm_stream=False),
         collect_non_loss_data=False,
         first_val_step=None,
         forward_only=False,
@@ -979,7 +980,7 @@ def test_combined_interleaved_schedule_records_forward_and_backward_vp_identity(
 ) -> None:
     sink = _RecordingSink()
     install_trace_sink(sink)
-    monkeypatch.setattr(combined_1f1b, "set_streams", lambda: None)
+    monkeypatch.setattr(combined_1f1b, "set_streams", lambda **kwargs: None)
     monkeypatch.setattr(
         combined_1f1b,
         "_combined_forward_backward_step_impl",
@@ -989,7 +990,7 @@ def test_combined_interleaved_schedule_records_forward_and_backward_vp_identity(
     backward_post_calls = []
 
     combined_1f1b.combined_1f1b_schedule_for_interleaved_pipelining(
-        config=SimpleNamespace(),
+        config=SimpleNamespace(high_priority_a2a_comm_stream=False),
         forward_step_func=lambda *args, **kwargs: None,
         data_iterator=[None, None],
         model=[object(), object()],
@@ -1020,3 +1021,32 @@ def test_combined_interleaved_schedule_records_forward_and_backward_vp_identity(
     assert record["ctx"]["backward_operation_id"] == "pp:microbatch=3:vp=1"
     assert len(forward_post_calls) == 1
     assert backward_post_calls == [(8,)]
+
+
+@pytest.mark.parametrize("trace_enabled", [False, True])
+@pytest.mark.parametrize("positional_fsdp", [False, True])
+def test_combined_step_forwards_native_fsdp_wrapper(monkeypatch, trace_enabled, positional_fsdp):
+    sink = _RecordingSink()
+    if trace_enabled:
+        install_trace_sink(sink)
+    wrapper = object()
+    output = (object(), object(), object())
+    received = []
+
+    def native_step(*args, **kwargs):
+        received.append(kwargs["fsdp_wrapper"])
+        return output
+
+    monkeypatch.setattr(combined_1f1b, "_combined_forward_backward_step_impl", native_step)
+    args = [None, None, object(), 1, None, [], object(), None, None, None, _phase_config()]
+    kwargs = {"backward_microbatch": 0, "b_model_chunk_id": 1}
+    if positional_fsdp:
+        # All native arguments through fsdp_wrapper retain their upstream position.
+        args.extend([None, None, None, None, None, False, None, False, 1, False, wrapper])
+    else:
+        kwargs["fsdp_wrapper"] = wrapper
+    result = combined_1f1b.combined_forward_backward_step(*args, **kwargs)
+
+    assert result is output
+    assert received == [wrapper]
+    assert len(sink.records) == int(trace_enabled)

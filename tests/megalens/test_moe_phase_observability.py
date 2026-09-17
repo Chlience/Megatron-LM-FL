@@ -322,12 +322,14 @@ def _layer_fixture(
             moe_token_dispatcher_type="alltoall",
             moe_expert_capacity_factor=1.25,
             moe_latent_size=None,
+            overlap_dispatch_backward_with_experts_wgrad=False,
         ),
         ep_group=[_Group(2)],
         layer_number=7,
         num_local_experts=2,
         token_dispatcher=dispatcher,
         experts=experts,
+        tp_group=object(),
     )
     layer._combine_with_scope = MethodType(MoELayer._combine_with_scope, layer)
     layer._finish_postprocess = MethodType(MoELayer._finish_postprocess, layer)
@@ -356,6 +358,7 @@ def _shared_expert_fixture(
         shared_expert_overlap=shared_expert_overlap,
         shared_experts_recompute=shared_experts_recompute,
         shared_experts=shared_experts,
+        tp_group=object(),
     )
     return layer, shared_experts, hidden_states
 
@@ -564,7 +567,9 @@ def test_aux_tracker_and_mtp_training_scaling_remain_unchanged(
         attached_losses.append(loss)
         return activation
 
-    monkeypatch.setattr(router_module, "save_to_aux_losses_tracker", save_tracker)
+    monkeypatch.setattr(
+        router_module, "get_moe_metrics_tracker", lambda: SimpleNamespace(record=save_tracker)
+    )
     monkeypatch.setattr(router_module.MoEAuxLossAutoScaler, "apply", staticmethod(attach))
 
     group = object()
@@ -596,7 +601,7 @@ def test_aux_tracker_and_mtp_training_scaling_remain_unchanged(
     torch.testing.assert_close(tracker_value, torch.tensor(1.0))
     assert layer_number == 10
     assert num_layers == 12
-    assert tracker_kwargs == {"reduce_group": group, "reduce_group_has_dp": False}
+    assert tracker_kwargs == {"reduce_group": group, "needs_dp_avg": True}
     torch.testing.assert_close(attached_losses[0], torch.tensor(0.6))
     # Source-compatible observation happens at each _apply_* producer before
     # this target-specific repeated-MTP scaling point.
@@ -690,7 +695,9 @@ def test_z_loss_observation_uses_source_base_and_preserves_existing_mtp_scaling(
         return logits
 
     monkeypatch.setattr(router_module, "z_loss_func", z_loss_func)
-    monkeypatch.setattr(router_module, "save_to_aux_losses_tracker", save_tracker)
+    monkeypatch.setattr(
+        router_module, "get_moe_metrics_tracker", lambda: SimpleNamespace(record=save_tracker)
+    )
     monkeypatch.setattr(router_module.MoEAuxLossAutoScaler, "apply", staticmethod(attach))
 
     owner = SimpleNamespace(
@@ -930,9 +937,7 @@ def test_moe_layer_checkpoint_reentry_keeps_phase_and_dispatch_state_local(
             return run_checkpoint(function, function_args)
 
         monkeypatch.setattr(moe_layer_module, "te_checkpoint", te_checkpoint)
-        monkeypatch.setattr(
-            moe_layer_module.parallel_state, "get_tensor_model_parallel_group", lambda: object()
-        )
+        layer.tp_group = object()
 
     output, mlp_bias = MoELayer.forward(layer, hidden_states)
 
@@ -1170,9 +1175,7 @@ def test_shared_expert_checkpoint_branches_keep_source_scope_and_arguments(
             return function(actual_hidden_states)
 
         monkeypatch.setattr(moe_layer_module, "te_checkpoint", te_checkpoint)
-        monkeypatch.setattr(
-            moe_layer_module.parallel_state, "get_tensor_model_parallel_group", lambda: tp_group
-        )
+        layer.tp_group = tp_group
 
     output = MoELayer.shared_experts_compute(layer, hidden_states)
 
@@ -1656,9 +1659,8 @@ def test_inference_tokens_per_expert_none_preserves_null_workload_slots() -> Non
     dispatcher.tokens_per_expert = None
     dispatcher.routing_map = torch.tensor([[True, False], [False, True]])
     layer._inference_token_dispatcher = object()
-    layer.is_inference_cuda_graphed_iteration = True
-
-    output, bias = MoELayer.routed_experts_compute(layer, torch.ones((2, 2)), torch.ones(2))
+    with moe_layer_module.InferenceMode.active():
+        output, bias = MoELayer.routed_experts_compute(layer, torch.ones((2, 2)), torch.ones(2))
 
     assert output is dispatcher.combined_output
     assert bias is None

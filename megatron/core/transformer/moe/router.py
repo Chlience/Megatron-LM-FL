@@ -5,9 +5,11 @@ from typing import Optional, Union
 
 import torch
 
+from megatron.core.inference.utils import InferenceMode
 from megatron.core.jit import jit_fuser
 from megatron.core.observability import open_trace_scope, prepare_trace_scope
 from megatron.core.transformer.module import MegatronModule
+from megatron.core.transformer.moe.moe_logging import get_moe_metrics_tracker
 from megatron.core.transformer.moe.moe_utils import (
     MoEAuxLossAutoScaler,
     ProcessGroupCollection,
@@ -17,7 +19,6 @@ from megatron.core.transformer.moe.moe_utils import (
     compute_routing_scores_for_aux_loss,
     get_tokens_per_expert_and_token_count,
     router_gating_linear,
-    save_to_aux_losses_tracker,
     sinkhorn,
     switch_load_balancing_loss_func,
     topk_routing_with_score_function,
@@ -38,11 +39,11 @@ from megatron.core.transformer.moe.observability import (
 from megatron.core.transformer.moe.router_replay import RouterReplay
 from megatron.core.transformer.transformer_config import TransformerConfig
 
-########## FlagScale Begin ##########
+######## FlagScale Begin ########
 from megatron.plugin.platform import get_platform
 
 cur_platform = get_platform()
-########## FlagScale End ##########
+######## FlagScale End ########
 
 
 class Router(ABC, MegatronModule):
@@ -114,13 +115,9 @@ class Router(ABC, MegatronModule):
         """
         if self.weight.device.type == 'cpu':
             # move weights to GPU
-            self.weight.data = self.weight.data.to(
-                device=cur_platform.current_device()
-            )  # FlagScale Add
+            self.weight.data = self.weight.data.to(device=cur_platform.current_device())  # FlagScale Modify
         if self.bias is not None and self.bias.device.type == 'cpu':
-            self.bias.data = self.bias.data.to(
-                device=cur_platform.current_device()
-            )  # FlagScale Add
+            self.bias.data = self.bias.data.to(device=cur_platform.current_device())  # FlagScale Modify
 
         # Convert to specified datatype for routing computation if enabled
         router_dtype = input.dtype
@@ -230,7 +227,7 @@ class TopKRouter(Router):
                 torch.zeros(
                     self.config.num_moe_experts,
                     dtype=torch.float32,
-                    device=cur_platform.current_device(),  # FlagScale Add
+                    device=cur_platform.current_device(),  # FlagScale Modify
                 ),
                 persistent=False,
             )
@@ -239,7 +236,7 @@ class TopKRouter(Router):
                 torch.zeros(
                     self.config.num_moe_experts,
                     dtype=torch.float32,
-                    device=cur_platform.current_device(),  # FlagScale Add
+                    device=cur_platform.current_device(),  # FlagScale Modify
                 ),
             )
         else:
@@ -253,15 +250,13 @@ class TopKRouter(Router):
                 torch.zeros(
                     self.config.num_moe_experts,
                     dtype=torch.float32,
-                    device=cur_platform.current_device(),  # FlagScale Add
+                    device=cur_platform.current_device(),  # FlagScale Modify
                 ),
                 persistent=False,
             )
             self.register_buffer(
                 'ga_steps',
-                torch.tensor(
-                    0, dtype=torch.float32, device=cur_platform.current_device()
-                ),  # FlagScale Add
+                torch.tensor(0, dtype=torch.float32, device=cur_platform.current_device()),  # FlagScale Modify
                 persistent=False,
             )
         else:
@@ -477,7 +472,7 @@ class TopKRouter(Router):
             global_aux_loss,
             "global_load_balancing_loss",
             self.tp_dp_cp_group,
-            reduce_group_has_dp=True,
+            needs_dp_avg=False,
             valid_token_count=local_num_tokens,
         )
         return probs
@@ -489,7 +484,7 @@ class TopKRouter(Router):
         aux_loss: torch.Tensor,
         aux_loss_name: str,
         reduce_group: torch.distributed.ProcessGroup,
-        reduce_group_has_dp: bool = False,
+        needs_dp_avg: bool = True,
         valid_token_count: Optional[Union[int, torch.Tensor]] = None,
     ):
         """Attach aux loss function to activation and add to logging.
@@ -500,9 +495,7 @@ class TopKRouter(Router):
             aux_loss (torch.Tensor): Computed aux loss.
             aux_loss_name (str): Name of the aux loss for logging.
             reduce_group (torch.distributed.ProcessGroup): Process group for reduction.
-            reduce_group_has_dp (bool): Whether the reduce group has data parallel ranks.
-                Set this to True if the reduce group has data parallel ranks. This flag is used to
-                ensure the correct reduction in aux loss tracking.
+            needs_dp_avg (bool): Whether to average this metric across DP ranks after reduce_group.
             valid_token_count (int or torch.Tensor, optional): Number of valid tokens excluding
                 padding tokens. Can be a Python int or a torch.Tensor (typically 0-d tensor).
                 If None, uses activation.shape[0]. Defaults to None.
@@ -530,13 +523,13 @@ class TopKRouter(Router):
         else:
             layer_number = self.layer_number
 
-        save_to_aux_losses_tracker(
+        get_moe_metrics_tracker().record(
             aux_loss_name,
             aux_loss / aux_loss_coeff,
             layer_number,
             num_layers,
             reduce_group=reduce_group,
-            reduce_group_has_dp=reduce_group_has_dp,
+            needs_dp_avg=needs_dp_avg,
         )
         if self.calculate_per_token_loss:
             # Scale the aux_loss by the number of tokens.
@@ -604,7 +597,7 @@ class TopKRouter(Router):
             else:
                 layer_number = self.layer_number
 
-            save_to_aux_losses_tracker(
+            get_moe_metrics_tracker().record(
                 "z_loss", z_loss / moe_z_loss_coeff, layer_number, num_layers
             )
         return logits
@@ -916,16 +909,6 @@ class InferenceTopKRouter(TopKRouter):
 
         super().__init__(config=config, pg_collection=pg_collection)
 
-        self.is_inference_cuda_graphed_iteration = False
-
-    def set_inference_cuda_graphed_iteration(self):
-        """Enable CUDA graph-compatible operations for the router."""
-        self.is_inference_cuda_graphed_iteration = True
-
-    def unset_inference_cuda_graphed_iteration(self):
-        """Disable CUDA graph-compatible operations for the router."""
-        self.is_inference_cuda_graphed_iteration = False
-
     @staticmethod
     @torch.compile
     def _compiled_topk_routing(
@@ -986,7 +969,7 @@ class InferenceTopKRouter(TopKRouter):
                 - top_indices: Selected expert indices [num_tokens, topk]
         """
 
-        if self.training or not self.is_inference_cuda_graphed_iteration:
+        if not InferenceMode.is_active():
             return super().forward(input, padding_mask)
 
         return self._forward(input, padding_mask)

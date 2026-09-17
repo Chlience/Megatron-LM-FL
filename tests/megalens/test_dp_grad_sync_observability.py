@@ -85,6 +85,8 @@ def _reset_sink():
 def _make_bucket_group(*, overlap_grad_reduce: bool):
     process_group = object()
     bucket_group = _ParamAndGradBucketGroup.__new__(_ParamAndGradBucketGroup)
+    bucket_group.previous_grad_reduce_bucket_group = None
+    bucket_group.grad_reduce_finished = False
     bucket_group.is_first_batch = False
     bucket_group.grad_reduce_handle = None
     bucket_group.buckets = [
@@ -126,12 +128,15 @@ def _configure_distributed_optimizer(bucket_group, process_group) -> None:
 def _make_param_bucket_group(*, overlap_param_gather: bool):
     process_group = object()
     bucket_group = _ParamAndGradBucketGroup.__new__(_ParamAndGradBucketGroup)
+    bucket_group.previous_grad_reduce_bucket_group = None
+    bucket_group.grad_reduce_finished = False
     bucket_group.buckets = [
-        SimpleNamespace(param_data=torch.ones(6, dtype=torch.float32)),
-        SimpleNamespace(param_data=torch.ones(3, dtype=torch.float16)),
+        SimpleNamespace(param_data=torch.ones(6, dtype=torch.float32), params=[]),
+        SimpleNamespace(param_data=torch.ones(3, dtype=torch.float16), params=[]),
     ]
     bucket_group.ddp_config = SimpleNamespace(
-        overlap_param_gather=overlap_param_gather, use_distributed_optimizer=True
+        overlap_param_gather=overlap_param_gather, use_distributed_optimizer=True,
+        reuse_grad_buf_for_mxfp8_param_ag=False
     )
     bucket_group.intra_distributed_optimizer_instance_group = process_group
     bucket_group.intra_distributed_optimizer_instance_size = 3
@@ -270,7 +275,7 @@ def test_dp_param_allgather_probe_supports_layerwise_optimizer(monkeypatch):
     remote_param = torch.nn.Parameter(torch.ones(3, dtype=torch.float32))
     bucket = SimpleNamespace(
         _layerwise_src_buffer=None,
-        grad_data=torch.empty(0, dtype=torch.float32),
+        grad_data=torch.empty(5, dtype=torch.float32),
         layerwise_gather_list=None,
         layerwise_param_flat_sizes=[2, 3],
         layerwise_params_list=[[local_param], [remote_param]],
@@ -278,6 +283,8 @@ def test_dp_param_allgather_probe_supports_layerwise_optimizer(monkeypatch):
         params_list=[local_param, remote_param],
     )
     bucket_group = _ParamAndGradBucketGroup.__new__(_ParamAndGradBucketGroup)
+    bucket_group.previous_grad_reduce_bucket_group = None
+    bucket_group.grad_reduce_finished = False
     bucket_group.buckets = [bucket]
     bucket_group.ddp_config = SimpleNamespace(
         overlap_param_gather=True, use_distributed_optimizer=False
@@ -337,7 +344,7 @@ def test_dp_param_allgather_skips_empty_layerwise_dispatch_probe(monkeypatch):
     empty_param = torch.nn.Parameter(torch.empty(0, dtype=torch.float32))
     bucket = SimpleNamespace(
         _layerwise_src_buffer=None,
-        grad_data=torch.empty(0, dtype=torch.float32),
+        grad_data=torch.empty(5, dtype=torch.float32),
         layerwise_gather_list=None,
         layerwise_param_flat_sizes=[0, 0],
         layerwise_params_list=[[], []],
@@ -345,6 +352,8 @@ def test_dp_param_allgather_skips_empty_layerwise_dispatch_probe(monkeypatch):
         params_list=[empty_param],
     )
     bucket_group = _ParamAndGradBucketGroup.__new__(_ParamAndGradBucketGroup)
+    bucket_group.previous_grad_reduce_bucket_group = None
+    bucket_group.grad_reduce_finished = False
     bucket_group.buckets = [bucket]
     bucket_group.ddp_config = SimpleNamespace(
         overlap_param_gather=True, use_distributed_optimizer=False

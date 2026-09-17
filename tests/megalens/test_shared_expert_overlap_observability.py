@@ -150,6 +150,7 @@ class _UnpackFails:
 
 
 class _SharedExpertHarness:
+    wait_current_stream = SharedExpertMLP.wait_current_stream
     _overlap_trace_scope = SharedExpertMLP._overlap_trace_scope
     pre_forward_comm = SharedExpertMLP.pre_forward_comm
     linear_fc1_forward_and_act = SharedExpertMLP.linear_fc1_forward_and_act
@@ -171,6 +172,8 @@ class _SharedExpertHarness:
             bias_activation_fusion=False,
             gated_linear_unit=False,
         )
+        self._overlap_state = shared_experts.SharedExpertState.IDLE
+        self.tp_group = object()
         self.stream = platform.shared
         self._shared_expert_trace_identity = identity
         self.use_shared_expert_gate = False
@@ -196,10 +199,11 @@ def overlap_runtime(monkeypatch: pytest.MonkeyPatch):
     timeline: list[tuple[Any, ...]] = []
     platform = _FakePlatform(timeline)
     monkeypatch.setattr(shared_experts, "cur_platform", platform)
+    monkeypatch.setattr(torch.cuda, "current_stream", platform.current_stream)
     monkeypatch.setattr(shared_experts, "apply_module", lambda module: module)
-    monkeypatch.setattr(shared_experts, "copy_to_tensor_model_parallel_region", lambda value: value)
+    monkeypatch.setattr(shared_experts, "copy_to_tensor_model_parallel_region", lambda value, *, group: value)
     monkeypatch.setattr(
-        shared_experts, "reduce_from_tensor_model_parallel_region", lambda value: value - 4.0
+        shared_experts, "reduce_from_tensor_model_parallel_region", lambda value, *, group: value - 4.0
     )
     monkeypatch.setattr(shared_experts, "set_tensor_grad_fn_sequence_sr", lambda *args: None)
     return timeline, platform
@@ -306,7 +310,8 @@ def test_overlap_probe_keeps_the_two_native_stream_dependencies_only() -> None:
     method_sources = {name: inspect.getsource(getattr(SharedExpertMLP, name)) for name in _STAGES}
 
     assert class_source.count(".wait_stream(") == 2
-    assert method_sources["pre_forward_comm"].count(".wait_stream(") == 1
+    assert method_sources["pre_forward_comm"].count(".wait_current_stream(") == 1
+    assert inspect.getsource(SharedExpertMLP.wait_current_stream).count(".wait_stream(") == 1
     assert method_sources["get_output"].count(".wait_stream(") == 1
     assert all(
         ".wait_stream(" not in method_sources[name]

@@ -18,11 +18,11 @@ try:
 except ImportError:
     has_nvml = False
 
-# FlagScale Begin
+######## FlagScale Begin ########
 from megatron.plugin.platform import get_platform
 
 cur_platform = get_platform()
-# FlagScale End
+######## FlagScale End ########
 
 
 class EnergyMonitor:
@@ -44,7 +44,7 @@ class EnergyMonitor:
         """Setup the NVML Handler."""
         if has_nvml:
             nvmlInit()
-            self._handle = nvmlDeviceGetHandleByIndex(cur_platform.current_device())  # FlagScale Add
+            self._handle = nvmlDeviceGetHandleByIndex(cur_platform.current_device())  # FlagScale Modify
 
     def shutdown(self) -> None:
         """Shutdown NVML."""
@@ -85,11 +85,11 @@ class EnergyMonitor:
         self._lap_energy = 0
         self._last_energy = energy
 
-        # FlagScale Begin
+        ######## FlagScale Begin ########
         lap_tensor = torch.tensor(
             [lap_energy], dtype=torch.int64, device=cur_platform.device_name()
         )
-        # FlagScale End
+        ######## FlagScale End ########
         dist.all_reduce(lap_tensor, op=dist.ReduceOp.SUM)
 
         return lap_tensor.item() / 1000.0
@@ -99,11 +99,11 @@ class EnergyMonitor:
         if not has_nvml:
             return 0.0
 
-        # FlagScale Begin
+        ######## FlagScale Begin ########
         energy_tensor = torch.tensor(
             [self._total_energy], dtype=torch.int64, device=cur_platform.device_name()
         )
-        # FlagScale End
+        ######## FlagScale End ########
         dist.all_reduce(energy_tensor, op=dist.ReduceOp.SUM)
 
         return energy_tensor.item() / 1000.0

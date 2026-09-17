@@ -14,13 +14,16 @@ import torch
 import megatron.core.utils as util
 import megatron.training.utils as training_util
 from megatron.core import config
+from megatron.core._rank_utils import safe_get_world_size
 from megatron.core.distributed import DistributedDataParallel, DistributedDataParallelConfig
 from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_layer_with_transformer_engine_submodules,
 )
 from megatron.core.optimizer import OptimizerConfig, get_megatron_optimizer
 from megatron.core.transformer import TransformerConfig
-from megatron.core.transformer.moe.moe_layer import MoELayer
+from megatron.core.transformer.moe.moe_layer import MoELayer, MoESubmodules
+from megatron.core.transformer.spec_utils import get_submodules
+from megatron.training.utils.common_utils import get_local_rank_preinit
 from tests.unit_tests.test_utilities import Utils
 
 success_string = "hello,world"
@@ -163,27 +166,19 @@ def test_nvtx_decorator(monkeypatch):
     # Track function execution
     execution_tracker = {'decorated': False, 'decorated_with_message': False}
 
-    class FakeNVTX:
-        @staticmethod
-        def annotate(message=None, color=None):
-            def decorator(func):
-                return func
+    # Decorate while NVTX is disabled (the common import-time scenario).
+    # The _nvtx_enabled flag must be checked at call time, not decoration time.
+    util.configure_nvtx_profiling(False)
 
-            return decorator
-
-    monkeypatch.setattr(util, "nvtx", FakeNVTX, raising=False)
-
-    # Create decorated functions
     @util.nvtx_decorator()
     def nvtx_decorated_function():
         execution_tracker['decorated'] = True
 
-    @util.nvtx_decorator(message="test_nvtx_decorator", color="red")
+    @util.nvtx_decorator(message="test_nvtx_decorator")
     def nvtx_decorated_function_with_message():
         execution_tracker['decorated_with_message'] = True
 
-    # Test with NVTX disabled
-    util.configure_nvtx_profiling(False)
+    # Call with NVTX disabled — should still execute the wrapped function
     nvtx_decorated_function()
     nvtx_decorated_function_with_message()
     assert all(execution_tracker.values())
@@ -191,89 +186,55 @@ def test_nvtx_decorator(monkeypatch):
     # Reset tracker
     execution_tracker = {'decorated': False, 'decorated_with_message': False}
 
-    # Test with NVTX enabled
+    # Enable NVTX *after* decoration — should pick up the new flag value
     util.configure_nvtx_profiling(True)
     nvtx_decorated_function()
     nvtx_decorated_function_with_message()
     assert all(execution_tracker.values())
 
+    # Reset tracker
+    execution_tracker = {'decorated': False, 'decorated_with_message': False}
 
-def test_get_batch_on_this_tp_rank_skips_dense_source_metadata(monkeypatch):
+    # Disable NVTX again — should respect the toggled flag
+    util.configure_nvtx_profiling(False)
+    nvtx_decorated_function()
+    nvtx_decorated_function_with_message()
+    assert all(execution_tracker.values())
+
+
+@pytest.mark.parametrize("tp_rank", [0, 1], ids=["source", "receiver"])
+def test_get_batch_on_this_tp_rank_skips_dense_metadata(monkeypatch, tp_rank):
     calls = []
-    args = SimpleNamespace(
-        hybrid_context_parallel=False,
-        pipeline_model_parallel_size=1,
-        sft=False,
-    )
-
-    class FakeCudaTensor:
-        def __init__(self, tensor):
-            self.tensor = tensor
-
-        def cuda(self, non_blocking=False):
-            return self.tensor
-
     batch = {
-        "tokens": FakeCudaTensor(torch.ones((2, 3), dtype=torch.long)),
-        "labels": FakeCudaTensor(torch.ones((2, 3), dtype=torch.long)),
-        "loss_mask": FakeCudaTensor(torch.ones((2, 3), dtype=torch.float32)),
-        "position_ids": FakeCudaTensor(torch.ones((2, 3), dtype=torch.long)),
+        "tokens": torch.ones((2, 3), dtype=torch.long),
+        "labels": torch.ones((2, 3), dtype=torch.long),
+        "loss_mask": torch.ones((2, 3), dtype=torch.float32),
+        "position_ids": torch.ones((2, 3), dtype=torch.long),
+        "cu_seqlens": None,
+        "max_seqlen": None,
     }
-
-    monkeypatch.setattr(training_util, "get_args", lambda: args)
-    monkeypatch.setattr(training_util.mpu, "get_tensor_model_parallel_rank", lambda: 0)
-    monkeypatch.setattr(training_util.mpu, "get_tensor_model_parallel_src_rank", lambda: 0)
-    monkeypatch.setattr(
-        training_util.mpu, "get_tensor_model_parallel_group", lambda: "tp-group"
-    )
-    monkeypatch.setattr(training_util.torch.cuda, "current_device", lambda: "cpu")
+    monkeypatch.setattr(util.torch.cuda, "current_device", lambda: "cpu")
 
     def fake_broadcast(item, src, group=None):
+        assert src == 0
+        assert group == "tp-group"
         calls.append((tuple(item.shape), item.dtype))
-        if item.dim() == 0 and item.dtype == torch.int64:
-            item.fill_(0)
 
-    monkeypatch.setattr(training_util.torch.distributed, "broadcast", fake_broadcast)
+    monkeypatch.setattr(util.torch.distributed, "broadcast", fake_broadcast)
 
-    result = training_util.get_batch_on_this_tp_rank(iter([batch]))
-
-    assert result["cu_seqlens"] is None
-    assert result["max_seqlen"] is None
-    assert calls == [
-        ((2, 3), torch.int64),
-        ((2, 3), torch.int64),
-        ((2, 3), torch.float32),
-        ((2, 3), torch.int64),
-    ]
-
-
-def test_get_batch_on_this_tp_rank_skips_dense_receiver_metadata(monkeypatch):
-    calls = []
-    args = SimpleNamespace(
-        hybrid_context_parallel=False,
-        pipeline_model_parallel_size=1,
+    result = util.get_batch_on_this_tp_rank(
+        batch=batch if tp_rank == 0 else {},
+        is_sft=False,
+        is_hybrid_cp=False,
+        create_attention_mask_in_dataloader=False,
+        broadcast_src_rank=0,
+        broadcast_group="tp-group",
+        cp_size=1,
+        tp_rank=tp_rank,
         micro_batch_size=2,
         seq_length=3,
-        create_attention_mask_in_dataloader=False,
-        sft=False,
+        mtp_on_this_rank=False,
     )
-
-    monkeypatch.setattr(training_util, "get_args", lambda: args)
-    monkeypatch.setattr(training_util.mpu, "get_tensor_model_parallel_rank", lambda: 1)
-    monkeypatch.setattr(training_util.mpu, "get_tensor_model_parallel_src_rank", lambda: 0)
-    monkeypatch.setattr(
-        training_util.mpu, "get_tensor_model_parallel_group", lambda: "tp-group"
-    )
-    monkeypatch.setattr(training_util.torch.cuda, "current_device", lambda: "cpu")
-
-    def fake_broadcast(item, src, group=None):
-        calls.append((tuple(item.shape), item.dtype))
-        if item.dim() == 0 and item.dtype == torch.int64:
-            item.fill_(0)
-
-    monkeypatch.setattr(training_util.torch.distributed, "broadcast", fake_broadcast)
-
-    result = training_util.get_batch_on_this_tp_rank(iter([]))
 
     assert result["cu_seqlens"] is None
     assert result["max_seqlen"] is None
@@ -412,12 +373,11 @@ def test_param_norm_moe(use_distributed_optimizer: bool):
         add_bias_linear=False,
         bf16=True,
     )
-    model = MoELayer(
-        transformer_config,
-        get_gpt_layer_with_transformer_engine_submodules(
-            num_experts=2, moe_grouped_gemm=True
-        ).mlp.submodules,
-    ).to(device='cuda')
+    submodules = get_submodules(
+        get_gpt_layer_with_transformer_engine_submodules(num_experts=2, moe_grouped_gemm=True).mlp
+    )
+    assert isinstance(submodules, MoESubmodules)
+    model = MoELayer(transformer_config, submodules).to(device='cuda')
     model.requires_grad_(True)
     # Initialize the model with all 1.0 for weights.
     for param in model.parameters():
@@ -556,3 +516,74 @@ def test_straggler_detector():
     util.StragglerDetector._configured = False
     # Teardown.
     _deinit_distributed()
+
+
+class TestGetWorldSizeSafe:
+    """Test get_world_size_safe function."""
+
+    @patch("torch.distributed.is_initialized")
+    @patch("torch.distributed.get_world_size")
+    def test_initialized_torch_distributed(self, mock_get_world_size, mock_is_initialized):
+        """Test get_world_size_safe when torch.distributed is initialized."""
+        mock_is_initialized.return_value = True
+        mock_get_world_size.return_value = 4
+
+        result = safe_get_world_size()
+
+        assert result == 4
+        mock_is_initialized.assert_called_once()
+        mock_get_world_size.assert_called_once()
+
+    @patch("torch.distributed.is_initialized")
+    @patch.dict(os.environ, {"WORLD_SIZE": "8"})
+    def test_uninitialized_torch_distributed_with_env_var(self, mock_is_initialized):
+        """Test get_world_size_safe when torch.distributed is not initialized but WORLD_SIZE env var exists."""
+        mock_is_initialized.return_value = False
+
+        result = safe_get_world_size()
+
+        assert result == 8
+        mock_is_initialized.assert_called_once()
+
+    @patch("torch.distributed.is_initialized")
+    @patch.dict(os.environ, {}, clear=True)
+    def test_uninitialized_torch_distributed_no_env_var(self, mock_is_initialized):
+        """Test get_world_size_safe when torch.distributed is not initialized and no WORLD_SIZE env var."""
+        mock_is_initialized.return_value = False
+
+        result = safe_get_world_size()
+
+        assert result == 1
+        mock_is_initialized.assert_called_once()
+
+    @patch("torch.distributed.is_initialized")
+    @patch.dict(os.environ, {"WORLD_SIZE": "invalid"})
+    def test_invalid_world_size_env_var(self, mock_is_initialized):
+        """Test get_world_size_safe with invalid WORLD_SIZE environment variable."""
+        mock_is_initialized.return_value = False
+
+        with pytest.raises(ValueError):
+            safe_get_world_size()
+
+
+class TestGetLocalRankPreinit:
+    """Test get_local_rank_preinit function."""
+
+    @patch.dict(os.environ, {"LOCAL_RANK": "3"}, clear=True)
+    def test_uses_local_rank_env_var(self):
+        assert get_local_rank_preinit() == 3
+
+    @patch.dict(
+        os.environ, {"LOCAL_RANK": "2", "SLURM_NTASKS": "8", "SLURM_LOCALID": "5"}, clear=True
+    )
+    def test_local_rank_takes_precedence_over_slurm(self):
+        assert get_local_rank_preinit() == 2
+
+    @patch.dict(os.environ, {"SLURM_NTASKS": "8", "SLURM_LOCALID": "6"}, clear=True)
+    def test_falls_back_to_slurm_localid(self):
+        assert get_local_rank_preinit() == 6
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_defaults_to_zero_with_warning(self):
+        with pytest.warns(UserWarning, match="Could not determine local rank"):
+            assert get_local_rank_preinit() == 0

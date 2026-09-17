@@ -46,6 +46,12 @@ that complete revision, including its runners and contracts. Historical GPU resu
 their recorded source and image revisions. Narrowing the validation matrix preserves the Probe,
 Trace, and analyzer implementations; the narrowed runner has CPU validation without a new GPU run.
 
+The development branch also integrates FlagOS main `c8fa61f2e403f490baf4cf43fbad24a122f7225a`
+(v0.18.2). Its compatibility checks cover the event contract, CPU regressions, and isolated
+sdist/wheel builds and imports. The wheel now includes `megatron.training`, following upstream.
+The GPU runs and pinned FlagScale images below retain their recorded revisions; v0.18.2 still
+requires training validation with the selected CUDA, Transformer Engine, and FlagScale versions.
+
 ## Enable a framework trace
 
 ### FlagScale YAML

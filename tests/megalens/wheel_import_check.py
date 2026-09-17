@@ -9,7 +9,6 @@ import importlib.metadata
 import sys
 from pathlib import Path
 
-
 CORE_MODULES = (
     "megatron.core",
     "megatron.core.observability",
@@ -43,6 +42,12 @@ MEGALENS_MODULES = (
 REQUIRED_WHEEL_FILES = frozenset(
     {
         "megatron/core/observability.py",
+        "megatron/core/transformer/moe/paged_stash.py",
+        "megatron/training/__init__.py",
+        "megatron/training/arguments.py",
+        "megatron/training/global_vars.py",
+        "megatron/training/training.py",
+        "megatron/training/utils/common_utils.py",
         "megatron/core/tensor_parallel/observability.py",
         "megatron/core/transformer/moe/observability.py",
         "megatron/plugin/dualpipev/dualpipev_schedules.py",

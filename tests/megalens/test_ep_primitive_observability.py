@@ -98,6 +98,8 @@ def _alltoall_owner(
         return synchronized_tokens
 
     return SimpleNamespace(
+        shared_experts=None,
+        use_nccl_stream=False,
         ep_group=_Group(group_size),
         ep_size=group_size,
         tp_size=3,
@@ -168,25 +170,29 @@ def _flex_owner(
             tp_size=2,
             ep_size=3,
             _comm_manager=manager,
+            shared_experts=None,
         ),
         manager,
     )
 
 
+@pytest.mark.parametrize("use_nccl_stream", [False, True])
 def test_standard_alltoall_dispatch_preserves_source_scope_fields_and_call_order(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, use_nccl_stream: bool,
 ) -> None:
     sink = _RecordingSink()
     install_trace_sink(sink)
     operations: list[tuple[Any, ...]] = []
     owner = _alltoall_owner(sink, operations)
+    owner.use_nccl_stream = use_nccl_stream
     tokens = torch.arange(12, dtype=torch.float32).reshape(4, 3)
     probs = torch.arange(4, dtype=torch.float16)
     dispatched_tokens = torch.tensor([[11.0]])
     dispatched_probs = torch.tensor([0.75])
     outputs = iter((dispatched_tokens, dispatched_probs))
 
-    def all_to_all(group, tensor, output_splits, input_splits):
+    def all_to_all(group, tensor, output_splits, input_splits, *, use_nccl_stream=False):
+        assert use_nccl_stream is owner.use_nccl_stream
         operations.append(
             ("all-to-all", tuple(sink.active), group, tensor, output_splits, input_splits)
         )
@@ -221,17 +227,20 @@ def test_standard_alltoall_dispatch_preserves_source_scope_fields_and_call_order
     assert operations[2][3:] == (probs, owner.output_splits, owner.input_splits)
 
 
+@pytest.mark.parametrize("use_nccl_stream", [False, True])
 def test_standard_alltoall_combine_preserves_arguments_and_ignores_legacy_async_flags(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, use_nccl_stream: bool,
 ) -> None:
     sink = _RecordingSink()
     install_trace_sink(sink)
     operations: list[tuple[Any, ...]] = []
     owner = _alltoall_owner(sink, operations)
+    owner.use_nccl_stream = use_nccl_stream
     hidden_states = torch.arange(8, dtype=torch.bfloat16).reshape(4, 2)
     combined = torch.tensor([[21.0]])
 
-    def all_to_all(group, tensor, output_splits, input_splits):
+    def all_to_all(group, tensor, output_splits, input_splits, *, use_nccl_stream=False):
+        assert use_nccl_stream is owner.use_nccl_stream
         operations.append(
             ("all-to-all", tuple(sink.active), group, tensor, output_splits, input_splits)
         )
@@ -275,7 +284,7 @@ def test_standard_alltoall_group_one_still_emits_source_event(
     monkeypatch.setattr(
         token_dispatcher_module,
         "all_to_all",
-        lambda group, tensor, output_splits, input_splits: tensor,
+        lambda group, tensor, output_splits, input_splits, *, use_nccl_stream=False: tensor,
     )
 
     result = MoEAlltoAllTokenDispatcher.token_combine(owner, hidden_states)
@@ -309,7 +318,7 @@ def test_closed_standard_alltoall_gates_skip_context_and_preserve_calls(
     monkeypatch.setattr(
         token_dispatcher_module,
         "all_to_all",
-        lambda group, tensor, output_splits, input_splits: tensor,
+        lambda group, tensor, output_splits, input_splits, *, use_nccl_stream=False: tensor,
     )
 
     dispatched = MoEAlltoAllTokenDispatcher.token_dispatch(owner, tokens, probs)
@@ -366,7 +375,7 @@ def test_real_adapter_records_standard_alltoall_source_fields(
     monkeypatch.setattr(
         token_dispatcher_module,
         "all_to_all",
-        lambda group, tensor, output_splits, input_splits: tensor,
+        lambda group, tensor, output_splits, input_splits, *, use_nccl_stream=False: tensor,
     )
 
     output = MoEAlltoAllTokenDispatcher.token_combine(owner, hidden_states)
@@ -905,4 +914,80 @@ def test_flex_probe_markers_and_public_signatures_remain_stable() -> None:
         "hidden_states",
         "async_finish",
         "allocate_on_comm_stream",
+    ]
+
+
+@pytest.mark.parametrize("trace_enabled", [False, True])
+def test_alltoall_shared_expert_native_launch_order(monkeypatch, trace_enabled):
+    sink = _RecordingSink()
+    if trace_enabled:
+        install_trace_sink(sink)
+    operations = []
+    owner = _alltoall_owner(sink, operations)
+    tokens, probs = torch.ones((2, 2)), torch.ones(2)
+    dispatched, dispatched_probs, combined = object(), object(), object()
+    outputs = iter((dispatched, dispatched_probs, combined))
+
+    def record(name, *args):
+        operations.append((name, tuple(sink.active), *args))
+
+    owner.shared_experts = SimpleNamespace(
+        wait_current_stream=lambda: record("wait"),
+        linear_fc1_forward_and_act=lambda value: record("fc1", value),
+        linear_fc2_forward=lambda value: record("fc2", value),
+        post_forward_comm=lambda: record("post"),
+    )
+
+    def all_to_all(group, tensor, output_splits, input_splits, *, use_nccl_stream=False):
+        record("all-to-all", tensor)
+        return next(outputs)
+
+    monkeypatch.setattr(token_dispatcher_module, "all_to_all", all_to_all)
+    assert MoEAlltoAllTokenDispatcher.token_dispatch(owner, tokens, probs) == (
+        dispatched, dispatched_probs
+    )
+    assert MoEAlltoAllTokenDispatcher.token_combine(owner, tokens) is combined
+    assert [op[0] for op in operations] == [
+        "wait", "synchronize", "all-to-all", "fc1", "all-to-all",
+        "wait", "all-to-all", "fc2", "post",
+    ]
+    assert operations[3][2] is dispatched
+    assert operations[7][2] is combined
+    dispatch_scope = ("ep-alltoall-dispatch",) if trace_enabled else ()
+    combine_scope = ("ep-alltoall-combine",) if trace_enabled else ()
+    assert [op[1] for op in operations] == [
+        (), dispatch_scope, dispatch_scope, dispatch_scope, dispatch_scope,
+        (), combine_scope, (), (),
+    ]
+
+
+@pytest.mark.parametrize("trace_enabled", [False, True])
+def test_flex_shared_expert_native_wait_and_pre_forward_order(trace_enabled):
+    sink = _RecordingSink()
+    if trace_enabled:
+        install_trace_sink(sink)
+    operations = []
+    owner, manager = _flex_owner(sink, operations)
+    tokens, probs = torch.ones((2, 2)), torch.ones(2)
+
+    def record(name, *args):
+        operations.append((name, tuple(sink.active), *args))
+
+    owner.shared_experts = SimpleNamespace(
+        wait_current_stream=lambda: record("wait"),
+        pre_forward_comm=lambda value, *, wait_current_stream: record(
+            "pre", value, wait_current_stream
+        ),
+        linear_fc1_forward_and_act=lambda value: record("fc1", value),
+    )
+    result, _ = MoEFlexTokenDispatcher.token_dispatch(owner, tokens, probs)
+    assert result is manager.dispatched_hidden
+    assert MoEFlexTokenDispatcher.token_combine(owner, tokens) is manager.combined_hidden
+    assert [op[0] for op in operations] == ["wait", "dispatch", "pre", "fc1", "wait", "combine"]
+    assert operations[2][2] is tokens
+    assert operations[2][3] is False
+    assert operations[3][2] is manager.dispatched_hidden
+    assert [op[1] for op in operations] == [
+        (), ("ep-alltoall-dispatch",) if trace_enabled else (), (), (), (),
+        ("ep-alltoall-combine",) if trace_enabled else (),
     ]
