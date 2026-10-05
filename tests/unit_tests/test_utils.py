@@ -24,7 +24,7 @@ from megatron.core.transformer import TransformerConfig
 from megatron.core.transformer.moe.moe_layer import MoELayer, MoESubmodules
 from megatron.core.transformer.spec_utils import get_submodules
 from megatron.training.utils.common_utils import get_local_rank_preinit
-from tests.unit_tests.test_utilities import Utils
+from tests.unit_tests.test_utilities import Utils, cur_platform, get_current_device
 
 success_string = "hello,world"
 
@@ -92,7 +92,7 @@ def test_experimental_cls_exception_static():
 def test_global_memory_buffer():
     global_memory_buffer = util.GlobalMemoryBuffer()
     obtained_tensor = global_memory_buffer.get_tensor((3, 2), torch.float32, "test_tensor")
-    expected_tensor = torch.empty((3, 2), dtype=torch.float32, device=torch.cuda.current_device())
+    expected_tensor = torch.empty((3, 2), dtype=torch.float32, device=get_current_device())
     assert obtained_tensor.shape == expected_tensor.shape
 
 
@@ -124,7 +124,7 @@ def _init_distributed(world, rank):
     Utils.initialize_distributed()
     assert torch.distributed.is_initialized() == True
     assert torch.distributed.get_rank() == rank
-    assert torch.cuda.device_count() == world
+    assert cur_platform.device_count() == world
     torch.distributed.barrier()
 
 
@@ -213,7 +213,8 @@ def test_get_batch_on_this_tp_rank_skips_dense_metadata(monkeypatch, tp_rank):
         "cu_seqlens": None,
         "max_seqlen": None,
     }
-    monkeypatch.setattr(util.torch.cuda, "current_device", lambda: "cpu")
+    monkeypatch.setattr(util.cur_platform, "current_device", lambda: 0)
+    monkeypatch.setattr(util.cur_platform, "device", lambda index: torch.device("cpu"))
 
     def fake_broadcast(item, src, group=None):
         assert src == 0
