@@ -7,7 +7,11 @@ import torch
 
 from megatron.core.inference.utils import InferenceMode
 from megatron.core.jit import jit_fuser
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.observability import open_trace_scope, prepare_trace_scope
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.transformer.module import MegatronModule
 from megatron.core.transformer.moe.moe_logging import get_moe_metrics_tracker
 from megatron.core.transformer.moe.moe_utils import (
@@ -24,6 +28,8 @@ from megatron.core.transformer.moe.moe_utils import (
     topk_routing_with_score_function,
     z_loss_func,
 )
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.transformer.moe.observability import (
     ROUTER_WORKLOAD_SLOTS,
     collect_router_assignment_fields,
@@ -36,6 +42,8 @@ from megatron.core.transformer.moe.observability import (
     router_workload,
     set_trace_fields,
 )
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.transformer.moe.router_replay import RouterReplay
 from megatron.core.transformer.transformer_config import TransformerConfig
 
@@ -70,7 +78,9 @@ class Router(ABC, MegatronModule):
         self.moe_aux_loss_func = None
         self.layer_number = layer_number
         self.is_mtp_layer = is_mtp_layer
+        # BEGIN MEGALENS OBSERVABILITY
         self.ep_group = pg_collection.ep
+        # END MEGALENS OBSERVABILITY
         self.tp_group = pg_collection.tp
         self.cp_group = pg_collection.cp
         self.tp_cp_group = pg_collection.tp_cp
@@ -363,7 +373,9 @@ class TopKRouter(Router):
             moe_aux_loss_coeff=aux_loss_coeff,
             fused=self.config.moe_router_fusion,
         )
+        # BEGIN MEGALENS OBSERVABILITY
         observe_router_loss("load_balancing_loss", aux_loss, aux_loss_coeff)
+        # END MEGALENS OBSERVABILITY
         probs = self.attach_and_log_load_balancing_loss(
             probs,
             aux_loss_coeff,
@@ -419,7 +431,9 @@ class TopKRouter(Router):
             / bsz
         )
 
+        # BEGIN MEGALENS OBSERVABILITY
         observe_router_loss("seq_load_balancing_loss", aux_loss, seq_aux_loss_coeff)
+        # END MEGALENS OBSERVABILITY
         probs = self.attach_and_log_load_balancing_loss(
             probs,
             seq_aux_loss_coeff,
@@ -465,7 +479,9 @@ class TopKRouter(Router):
             moe_aux_loss_coeff=global_aux_loss_coeff,
             fused=self.config.moe_router_fusion,
         )
+        # BEGIN MEGALENS OBSERVABILITY
         observe_router_loss("global_load_balancing_loss", global_aux_loss, global_aux_loss_coeff)
+        # END MEGALENS OBSERVABILITY
         probs = self.attach_and_log_load_balancing_loss(
             probs,
             global_aux_loss_coeff,
@@ -563,7 +579,9 @@ class TopKRouter(Router):
             # Skip Z loss calculations when using torch.no_grad() or checkpointing.
             moe_z_loss_coeff = self.config.moe_z_loss_coeff / self.tp_cp_group.size()
             z_loss = z_loss_func(logits, moe_z_loss_coeff, padding_mask=padding_mask)
+            # BEGIN MEGALENS OBSERVABILITY
             observe_router_loss("z_loss", z_loss, moe_z_loss_coeff)
+            # END MEGALENS OBSERVABILITY
             if self.calculate_per_token_loss:
                 # The expected final scaling for z_loss gradients is
                 # 1/(num_micro_batches * dp_size).
@@ -733,11 +751,13 @@ class TopKRouter(Router):
             )
 
         # Preserve the source pre-drop assignment count only for an accepted eager trace call.
+        # BEGIN MEGALENS OBSERVABILITY
         if (
             self.config.moe_expert_capacity_factor is not None
             and not self.config.moe_pad_expert_input_to_capacity
         ):
             observe_router_assignments_before_drop(routing_map)
+        # END MEGALENS OBSERVABILITY
 
         # Apply token dropping to probs and routing_map.
         if self.config.moe_expert_capacity_factor is not None:
@@ -825,6 +845,7 @@ class TopKRouter(Router):
                 logits, self.config.moe_router_force_biased, self.layer_number
             )
 
+        # BEGIN MEGALENS OBSERVABILITY
         router_gate = prepare_trace_scope("moe-router")
         router_context = router_trace_context(self) if router_gate is not None else None
         dispatch_fields_enabled = dispatch_fields_requested()
@@ -856,6 +877,7 @@ class TopKRouter(Router):
                 publish_dispatch_fields(fields)
                 if router_gate is not None:
                     set_trace_fields(router_scope, fields)
+        # END MEGALENS OBSERVABILITY
 
         return probs, routing_map
 
@@ -870,7 +892,9 @@ class TopKRouter(Router):
         return super()._save_to_state_dict(*args, **kwargs)
 
 
+# BEGIN MEGALENS OBSERVABILITY
 setattr(TopKRouter.forward, "__megatron_trace_event__", "moe-router")
+# END MEGALENS OBSERVABILITY
 
 
 class InferenceTopKRouter(TopKRouter):

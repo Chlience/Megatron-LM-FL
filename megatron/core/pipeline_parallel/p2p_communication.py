@@ -1,16 +1,27 @@
 # Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 import weakref
 from dataclasses import dataclass
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from functools import partial  # FlagScale Add
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from itertools import count
 from threading import RLock
 from typing import Any, Callable, List, Optional, Tuple, Union
+
+# END MEGALENS OBSERVABILITY  # isort: split
 
 import torch
 import torch.distributed as dist
 
 from megatron.core.model_parallel_config import ModelParallelConfig
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.observability import open_trace_scope, prepare_trace_scope, trace_is_enabled
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.pipeline_parallel.utils import is_pp_first_stage, is_pp_last_stage
 
 ######## FlagScale Begin ########
@@ -36,6 +47,7 @@ cur_platform = get_platform()
 ######## FlagScale End ########
 
 
+# BEGIN MEGALENS OBSERVABILITY
 _P2P_BATCH_SEQUENCE = count(1)
 _P2P_LAUNCH_GATE_UNSET = object()
 
@@ -564,6 +576,7 @@ def _p2p_batch_request_pairing(requests: Any, operation_count: int) -> str:
     if request_count == 1 and operation_count > 1:
         return "aggregate"
     return "unknown"
+# END MEGALENS OBSERVABILITY
 
 
 def _batched_p2p_ops(
@@ -604,6 +617,7 @@ def _batched_p2p_ops(
     return reqs
 
 
+# BEGIN MEGALENS OBSERVABILITY
 def _p2p_group_plan(group: torch.distributed.ProcessGroup) -> list[tuple[str, Any]]:
     """Resolve the physical process group and launch order for individual P2P operations."""
     primary_group = group
@@ -626,6 +640,7 @@ def _p2p_group_plan(group: torch.distributed.ProcessGroup) -> list[tuple[str, An
         ("recv_next", primary_group),
         ("send_prev", alternate_group),
     ]
+# END MEGALENS OBSERVABILITY
 
 
 def _p2p_ops(
@@ -637,9 +652,12 @@ def _p2p_ops(
     group: torch.distributed.ProcessGroup,
     prev_pipeline_rank: int,
     next_pipeline_rank: int,
+    # BEGIN MEGALENS OBSERVABILITY
     group_plan: Optional[list[tuple[str, Any]]] = None,
+    # END MEGALENS OBSERVABILITY
 ):
     reqs = {}
+    # BEGIN MEGALENS OBSERVABILITY
     tensors = {
         "send_prev": tensor_send_prev,
         "recv_prev": tensor_recv_prev,
@@ -665,6 +683,7 @@ def _p2p_ops(
             reqs[key] = torch.distributed.irecv(
                 tensor=tensor, src=peer_ranks[key], group=request_group
             )
+    # END MEGALENS OBSERVABILITY
     return reqs
 
 
@@ -688,8 +707,10 @@ class P2PCommunicator:
         # Basic attrs
         self.pp_group = pp_group
         self.config = config
+        # BEGIN MEGALENS OBSERVABILITY
         self._p2p_work_observations: dict[int, _P2PWorkObservation] = {}
         self._p2p_work_observation_lock = RLock()
+        # END MEGALENS OBSERVABILITY
         # FlagScale Begin
         if not isinstance(self.pp_group, list):
             world_size = self.pp_group.size()
@@ -707,6 +728,7 @@ class P2PCommunicator:
             )
         ######## FlagScale End ########
 
+    # BEGIN MEGALENS OBSERVABILITY
     def _register_p2p_request(self, request: Any, operation: _P2POperation) -> None:
         """Best-effort registration that never changes communication behavior."""
         request_key = id(request)
@@ -775,6 +797,7 @@ class P2PCommunicator:
             return request.wait(*args, **kwargs)
         operation = self._next_p2p_wait_observation(request)
         return _wait_p2p_request(request, operation, *args, **kwargs)
+    # END MEGALENS OBSERVABILITY
 
     @property
     def is_pp_first_stage(self) -> bool:
@@ -985,14 +1008,20 @@ class P2PCommunicator:
                 return []
 
             p2p_func = _ring_exchange_wrapper
+            # BEGIN MEGALENS OBSERVABILITY
             transport_api = "ring_exchange"
+            # END MEGALENS OBSERVABILITY
         elif config.batch_p2p_comm:
             assert wait_on_reqs
             p2p_func = _batched_p2p_ops
+            # BEGIN MEGALENS OBSERVABILITY
             transport_api = "batch_isend_irecv"
+            # END MEGALENS OBSERVABILITY
         else:
             p2p_func = _p2p_ops
+            # BEGIN MEGALENS OBSERVABILITY
             transport_api = "isend_irecv"
+            # END MEGALENS OBSERVABILITY
 
         ######## FlagScale Begin ########
         if group is not None:
@@ -1024,6 +1053,7 @@ class P2PCommunicator:
         if tensor_recv_next_func is not None:
             tensor_recv_next = tensor_recv_next_func()
 
+        # BEGIN MEGALENS OBSERVABILITY
         p2p_group_plan = None
         if transport_api == "isend_irecv":
             p2p_group_plan = _p2p_group_plan(pp_group)
@@ -1106,12 +1136,14 @@ class P2PCommunicator:
                 next_pipeline_rank=next_rank,
             )
         physical_request_count = len(p2p_reqs)
+        # END MEGALENS OBSERVABILITY
         if isinstance(p2p_reqs, list):
             reqs.extend(p2p_reqs)
         else:
             reqs.update(p2p_reqs)
 
         if wait_on_reqs and len(reqs) > 0:
+            # BEGIN MEGALENS OBSERVABILITY
             if not operations:
                 for req in reqs if isinstance(reqs, list) else reqs.values():
                     req.wait()
@@ -1129,13 +1161,17 @@ class P2PCommunicator:
                 operations_by_key = {operation.key: operation for operation in operations}
                 for key, req in reqs.items():
                     _wait_p2p_request(req, operations_by_key.get(key))
+            # END MEGALENS OBSERVABILITY
             reqs = None
+        # BEGIN MEGALENS OBSERVABILITY
         elif len(reqs) > 0 and operations:
             self._register_p2p_requests(reqs, operations)
+        # END MEGALENS OBSERVABILITY
 
         if config.batch_p2p_comm and config.batch_p2p_sync:
             # To protect against race condition when using batch_isend_irecv().
             # User should assert that we have a modern enough PyTorch to not need this
+            # BEGIN MEGALENS OBSERVABILITY
             sync_gate = prepare_trace_scope("p2p-batch-device-sync")
             sync_operations = ensure_operations() if sync_gate is not None else []
             _synchronize_p2p_batch(
@@ -1144,6 +1180,7 @@ class P2PCommunicator:
                 physical_request_count,
                 transport_api,
             )
+            # END MEGALENS OBSERVABILITY
 
         return tensor_recv_prev, tensor_recv_next, reqs
 

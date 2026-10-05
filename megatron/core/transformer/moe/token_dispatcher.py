@@ -12,7 +12,11 @@ from megatron.core.config import is_experimental_enabled
 from megatron.core.fusions.fused_indices_converter import fused_indices_to_multihot
 from megatron.core.fusions.fused_pad_routing_map import fused_pad_routing_map
 from megatron.core.jit import jit_fuser
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.observability import open_trace_scope, prepare_trace_scope
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.tensor_parallel import (
     all_to_all,
     gather_from_sequence_parallel_region,
@@ -36,7 +40,11 @@ from megatron.core.transformer.moe.moe_utils import (
     sort_chunks_by_idxs,
     unpermute,
 )
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.transformer.moe.observability import ep_collective_trace_context
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.transformer.moe.shared_experts import SharedExpertMLP
 from megatron.core.transformer.transformer_config import TransformerConfig
 
@@ -274,6 +282,7 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
     def token_dispatch(self, hidden_states, probs):
         """Gathers tokens from all TP*EP ranks using AllGather."""
 
+        # BEGIN MEGALENS OBSERVABILITY
         dispatch_gate = prepare_trace_scope("ep-allgather-dispatch")
         dispatch_context = (
             ep_collective_trace_context(
@@ -305,6 +314,7 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
                 hidden_states = gather_from_sequence_parallel_region(
                     hidden_states, group=self.tp_ep_group, use_global_buffer=True
                 )
+        # END MEGALENS OBSERVABILITY
 
         return hidden_states, probs
 
@@ -366,6 +376,7 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
         originally held them. This completes the expert processing
         communication pattern and prepares tokens for final unpermutation.
         """
+        # BEGIN MEGALENS OBSERVABILITY
         combine_gate = prepare_trace_scope("ep-allgather-combine")
         combine_context = (
             ep_collective_trace_context(
@@ -384,6 +395,7 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
                 hidden_states = reduce_scatter_to_sequence_parallel_region(
                     hidden_states.to(self.local_probs.dtype), group=self.tp_ep_group
                 ).to(hidden_states.dtype)
+        # END MEGALENS OBSERVABILITY
         return hidden_states
 
     def combine_postprocess(self, hidden_states):
@@ -729,6 +741,7 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
         if self.shared_experts is not None:
             self.shared_experts.wait_current_stream()
         # Perform expert parallel AlltoAll communication
+        # BEGIN MEGALENS OBSERVABILITY
         dispatch_gate = prepare_trace_scope("ep-alltoall-dispatch")
         dispatch_context = (
             ep_collective_trace_context(
@@ -765,6 +778,7 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
                 self.input_splits,
                 use_nccl_stream=self.use_nccl_stream,
             )
+        # END MEGALENS OBSERVABILITY
 
         return global_input_tokens, global_probs
 
@@ -904,6 +918,7 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
             self.shared_experts.wait_current_stream()
         # Perform expert parallel AlltoAll communication
         # hidden_states: [SEQL, H] -> [SEQL, H/TP]
+        # BEGIN MEGALENS OBSERVABILITY
         combine_gate = prepare_trace_scope("ep-alltoall-combine")
         combine_context = (
             ep_collective_trace_context(
@@ -924,6 +939,7 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
                 self.output_splits,
                 use_nccl_stream=self.use_nccl_stream,
             )
+        # END MEGALENS OBSERVABILITY
         if self.shared_experts is not None:
             self.shared_experts.linear_fc2_forward(permutated_local_input_tokens)
             self.shared_experts.post_forward_comm()
@@ -1611,6 +1627,7 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
         """
         if self.shared_experts is not None:
             self.shared_experts.wait_current_stream()
+        # BEGIN MEGALENS OBSERVABILITY
         comm_type = (
             "ep-hybridep"
             if self.config.moe_flex_dispatcher_backend == "hybridep"
@@ -1632,6 +1649,7 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
             dispatched_hidden_states = self._comm_manager.dispatch(
                 hidden_states, async_finish, allocate_on_comm_stream
             )
+        # END MEGALENS OBSERVABILITY
         if self.shared_experts is not None:
             self.shared_experts.pre_forward_comm(hidden_states, wait_current_stream=False)
             self.shared_experts.linear_fc1_forward_and_act(dispatched_hidden_states)
@@ -1688,6 +1706,7 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
         # when CUDA_DEVICE_MAX_CONNECTIONS>1.
         if self.shared_experts is not None:
             self.shared_experts.wait_current_stream()
+        # BEGIN MEGALENS OBSERVABILITY
         comm_type = (
             "ep-hybridep"
             if self.config.moe_flex_dispatcher_backend == "hybridep"
@@ -1707,6 +1726,7 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
         )
         with open_trace_scope(combine_gate, "ep-alltoall-combine", attrs=combine_context):
             return self._comm_manager.combine(hidden_states, async_finish, allocate_on_comm_stream)
+        # END MEGALENS OBSERVABILITY
 
     def combine_postprocess(self, hidden_states: torch.Tensor):
         """
@@ -1740,6 +1760,7 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
             self._comm_manager.over_budget.fill_(0)
 
 
+# BEGIN MEGALENS OBSERVABILITY
 setattr(
     MoEAlltoAllTokenDispatcher.token_dispatch, "__megatron_trace_event__", "ep-alltoall-dispatch"
 )
@@ -1752,3 +1773,4 @@ setattr(
 )
 setattr(MoEFlexTokenDispatcher.token_dispatch, "__megatron_trace_event__", "ep-alltoall-dispatch")
 setattr(MoEFlexTokenDispatcher.token_combine, "__megatron_trace_event__", "ep-alltoall-combine")
+# END MEGALENS OBSERVABILITY

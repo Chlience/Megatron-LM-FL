@@ -1,26 +1,31 @@
 # FlagScale baseline: 6d775cd01d5c822f9413b9952a81652c917d273e
 # Purpose: preserve the Megatron-LM-FL MegaLens lifecycle and dense-batch Graph compatibility through FlagScale's vendored training overlay.
 diff --git a/flagscale/train/megatron/training/arguments.py b/flagscale/train/megatron/training/arguments.py
-index 2105958a79d5f1adbd61344a78a42c92ecc8d450..07615c5427fc843cb3d2263af2b43aef863a41fc 100644
+index 2105958a79d5f1adbd61344a78a42c92ecc8d450..b30f7f3804674cff53e29d8807d4a4ae78ce84a6 100644
 --- a/flagscale/train/megatron/training/arguments.py
 +++ b/flagscale/train/megatron/training/arguments.py
-@@ -9,6 +9,7 @@ import os
+@@ -9,6 +9,9 @@ import os
  from pathlib import Path
  import re
  import types
++# BEGIN MEGALENS OBSERVABILITY
 +import warnings
++# END MEGALENS OBSERVABILITY
  
  import torch
  import torch.nn.functional as F
-@@ -86,9 +87,95 @@ def add_megatron_arguments(parser: argparse.ArgumentParser):
+@@ -86,9 +89,99 @@ def add_megatron_arguments(parser: argparse.ArgumentParser):
      parser = _add_msc_args(parser)
      parser = _add_kitchen_quantization_arguments(parser)
      parser = _add_sft_args(parser)
++    # BEGIN MEGALENS OBSERVABILITY
 +    parser = _add_megalens_args(parser)
++    # END MEGALENS OBSERVABILITY
  
      return parser
  
 +
++# BEGIN MEGALENS OBSERVABILITY
 +def _add_megalens_args(parser):
 +    group = parser.add_argument_group(title='megalens')
 +    group.add_argument(
@@ -103,36 +108,42 @@ index 2105958a79d5f1adbd61344a78a42c92ecc8d450..07615c5427fc843cb3d2263af2b43aef
 +        raise ValueError(
 +            'MegaLens kernel capture cannot nest the Megatron PyTorch profiler'
 +        )
++# END MEGALENS OBSERVABILITY
 +
 +
  def parse_args(extra_args_provider=None, ignore_unknown_args=False):
      """Parse all arguments."""
      parser = argparse.ArgumentParser(description='Megatron-LM Arguments',
-@@ -322,6 +409,8 @@ def tuple_type(x):
+@@ -322,6 +415,10 @@ def tuple_type(x):
  
  def validate_args(args, defaults={}):
  
++    # BEGIN MEGALENS OBSERVABILITY
 +    _validate_megalens_args(args)
++    # END MEGALENS OBSERVABILITY
 +
      # Temporary
      assert args.non_persistent_ckpt_type in ['global', 'local', None], \
          'Currently only global and local checkpoints are supported'
 diff --git a/flagscale/train/megatron/training/global_vars.py b/flagscale/train/megatron/training/global_vars.py
-index 530030c8f3db745d98349b13d2d5f862f07ab168..c0678ead56f705db6bcf6024c9c2dfd9497d11a7 100644
+index 530030c8f3db745d98349b13d2d5f862f07ab168..62acae90ac63639b698ef7fd9d49bb685f409287 100644
 --- a/flagscale/train/megatron/training/global_vars.py
 +++ b/flagscale/train/megatron/training/global_vars.py
-@@ -31,6 +31,7 @@ _GLOBAL_ADLR_AUTORESUME = None
+@@ -31,6 +31,9 @@ _GLOBAL_ADLR_AUTORESUME = None
  _GLOBAL_TIMERS = None
  _GLOBAL_ENERGY_MONITOR = None
  _GLOBAL_SIGNAL_HANDLER = None
++# BEGIN MEGALENS OBSERVABILITY
 +_GLOBAL_MEGALENS_RUNTIME = None
++# END MEGALENS OBSERVABILITY
  
  ########## FlagScale Begin ##########
  _GLOBAL_SPIKY_LOSS_DETECTOR = None
-@@ -89,6 +90,18 @@ def get_signal_handler():
+@@ -89,6 +92,20 @@ def get_signal_handler():
      return _GLOBAL_SIGNAL_HANDLER
  
  
++# BEGIN MEGALENS OBSERVABILITY
 +def get_megalens_runtime():
 +    """Return the lazily-created per-rank MegaLens runtime."""
 +    _ensure_var_is_initialized(_GLOBAL_MEGALENS_RUNTIME, 'MegaLens runtime')
@@ -143,51 +154,61 @@ index 530030c8f3db745d98349b13d2d5f862f07ab168..c0678ead56f705db6bcf6024c9c2dfd9
 +    """Return the active MegaLens tracer, or ``None`` when tracing is disabled."""
 +    runtime = _GLOBAL_MEGALENS_RUNTIME
 +    return runtime.tracer if runtime is not None else None
++# END MEGALENS OBSERVABILITY
 +
 +
  def _set_signal_handler(exit_signal):
  
      global _GLOBAL_SIGNAL_HANDLER
-@@ -109,6 +122,8 @@ def _graceful_shutdown(signum, frame):
+@@ -109,6 +126,10 @@ def _graceful_shutdown(signum, frame):
      from megatron.training.utils import print_rank_0
      print_rank_0("\nTermination requested. Performing orderly shutdown.")
  
++    # BEGIN MEGALENS OBSERVABILITY
 +    shutdown_megalens_runtime(graceful=False)
++    # END MEGALENS OBSERVABILITY
 +
      try:
          if torch.distributed.is_available() and torch.distributed.is_initialized():
              # synchronize all ranks before exiting
-@@ -160,6 +175,8 @@ def set_global_variables(args, build_tokenizer=True):
+@@ -160,6 +181,10 @@ def set_global_variables(args, build_tokenizer=True):
      if args.disable_jit_fuser:
          disable_jit_fuser()
  
++    # BEGIN MEGALENS OBSERVABILITY
 +    _set_megalens_runtime(args)
++    # END MEGALENS OBSERVABILITY
 +
  
  def set_global_writers(args):
      """Set tensorboard-writer and wandb writer.
-@@ -211,6 +228,9 @@ def unset_global_variables():
+@@ -211,6 +236,11 @@ def unset_global_variables():
      global _GLOBAL_TIMERS
      global _GLOBAL_ENERGY_MONITOR
      global _GLOBAL_SIGNAL_HANDLER
++    # BEGIN MEGALENS OBSERVABILITY
 +    global _GLOBAL_MEGALENS_RUNTIME
 +
 +    shutdown_megalens_runtime(graceful=False)
++    # END MEGALENS OBSERVABILITY
  
      _GLOBAL_ARGS = None
      _GLOBAL_NUM_MICROBATCHES_CALCULATOR = None
-@@ -222,6 +242,7 @@ def unset_global_variables():
+@@ -222,6 +252,9 @@ def unset_global_variables():
      _GLOBAL_TIMERS = None
      _GLOBAL_ENERGY_MONITOR = None
      _GLOBAL_SIGNAL_HANDLER = None
++    # BEGIN MEGALENS OBSERVABILITY
 +    _GLOBAL_MEGALENS_RUNTIME = None
++    # END MEGALENS OBSERVABILITY
  
      unset_num_microbatches_calculator()
  
-@@ -231,6 +252,30 @@ def set_args(args):
+@@ -231,6 +264,32 @@ def set_args(args):
      _GLOBAL_ARGS = args
  
  
++# BEGIN MEGALENS OBSERVABILITY
 +def _set_megalens_runtime(args):
 +    """Create MegaLens only when tracing was explicitly requested."""
 +    global _GLOBAL_MEGALENS_RUNTIME
@@ -210,52 +231,62 @@ index 530030c8f3db745d98349b13d2d5f862f07ab168..c0678ead56f705db6bcf6024c9c2dfd9
 +        runtime.shutdown(graceful=graceful)
 +    finally:
 +        _GLOBAL_MEGALENS_RUNTIME = None
++# END MEGALENS OBSERVABILITY
 +
 +
  def _build_tokenizer(args):
      """Initialize tokenizer."""
      global _GLOBAL_TOKENIZER
-@@ -374,6 +419,8 @@ def _ensure_var_is_not_initialized(var, name):
+@@ -374,6 +433,10 @@ def _ensure_var_is_not_initialized(var, name):
      assert var is None, '{} is already initialized.'.format(name)
  
  def destroy_global_vars():
++    # BEGIN MEGALENS OBSERVABILITY
 +    shutdown_megalens_runtime(graceful=False)
++    # END MEGALENS OBSERVABILITY
 +
      global _GLOBAL_ARGS
      _GLOBAL_ARGS = None
  
 diff --git a/flagscale/train/megatron/training/training.py b/flagscale/train/megatron/training/training.py
-index d48ddfb2b83a5d9ec775371b903684ecb090f789..983bc4d597bc7cafc5677be5d21c93a6dea19bb8 100644
+index d48ddfb2b83a5d9ec775371b903684ecb090f789..c9b61749f1f790d0875724be077aaef04657d07c 100644
 --- a/flagscale/train/megatron/training/training.py
 +++ b/flagscale/train/megatron/training/training.py
-@@ -44,12 +44,13 @@ import math
+@@ -44,12 +44,17 @@ import math
  import os
  import socket
  import sys
 -from contextlib import nullcontext
++# BEGIN MEGALENS OBSERVABILITY
 +from contextlib import ExitStack, nullcontext
++# END MEGALENS OBSERVABILITY
  from pathlib import Path
  from typing import Any, Optional, Dict
  
  import torch.distributed
  
++# BEGIN MEGALENS OBSERVABILITY
 +from megatron.core.observability import trace_scope
++# END MEGALENS OBSERVABILITY
  from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer
  from megatron.core.optimizer_param_scheduler import get_canonical_lr_for_logging
  from .log_handler import CustomHandler
-@@ -249,6 +250,8 @@ from megatron.training.global_vars import (
+@@ -249,6 +254,10 @@ from megatron.training.global_vars import (
      get_one_logger,
      get_tokenizer,
      get_energy_monitor,
++    # BEGIN MEGALENS OBSERVABILITY
 +    get_megalens_runtime,
 +    shutdown_megalens_runtime,
++    # END MEGALENS OBSERVABILITY
  )
  from . import one_logger_utils
  from .dgrad_logging import enable_dgrad_logging, disable_dgrad_logging, save_dgrads
-@@ -933,6 +936,28 @@ def preprocess_common_state_dict(common_state_dict):
+@@ -933,6 +942,30 @@ def preprocess_common_state_dict(common_state_dict):
      return preprocessed_common_state_dict
  
  
++# BEGIN MEGALENS OBSERVABILITY
 +def _owns_megalens_runtime(pretrain_func):
 +    """Ensure failures across the pretrain lifecycle close MegaLens."""
 +
@@ -278,20 +309,23 @@ index d48ddfb2b83a5d9ec775371b903684ecb090f789..983bc4d597bc7cafc5677be5d21c93a6
 +
 +
 +@_owns_megalens_runtime
++# END MEGALENS OBSERVABILITY
  def pretrain(
      train_valid_test_dataset_provider,
      model_provider,
-@@ -2187,7 +2212,8 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
+@@ -2187,7 +2220,10 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
          profile_cuda=profile_cuda,
      ):
          timers('optimizer', log_level=1).start(barrier=args.barrier_with_L1_time)
 -        update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
++        # BEGIN MEGALENS OBSERVABILITY
 +        with trace_scope("optimizer"):
 +            update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
++        # END MEGALENS OBSERVABILITY
          # get max attention logit for logging and run clip_qk()
          # Part of MuonClip Optimizer step
          log_max_attention_logit = 0
-@@ -2196,58 +2222,68 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
+@@ -2196,58 +2232,69 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
      
          timers('optimizer').stop()
  
@@ -345,6 +379,7 @@ index d48ddfb2b83a5d9ec775371b903684ecb090f789..983bc4d597bc7cafc5677be5d21c93a6
 -                loss_reduced[key] = val
 -            else:
 -                raise ValueError(f"Invalid value shape: {val[0].shape} for key {key}")
++    # BEGIN MEGALENS OBSERVABILITY
 +    with trace_scope("optimizer-postprocess"):
 +        # when freezing sub-models we may have a mixture of successful and unsucessful ranks,
 +        # so we must gather across mp ranks
@@ -411,22 +446,25 @@ index d48ddfb2b83a5d9ec775371b903684ecb090f789..983bc4d597bc7cafc5677be5d21c93a6
              skipped_iter,
              should_checkpoint,
              should_exit,
-@@ -2256,7 +2292,6 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
+@@ -2256,7 +2303,7 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
              num_zeros_in_grad,
              log_max_attention_logit,
          )
++    # END MEGALENS OBSERVABILITY
 -    return {}, skipped_iter, should_checkpoint, should_exit, exit_code, grad_norm, num_zeros_in_grad, log_max_attention_logit
  
  
  def training_log(
-@@ -3264,212 +3299,277 @@ def train(
+@@ -3264,212 +3311,281 @@ def train(
      # Run training iterations till done.
      buffered_rollouts = None
++    # BEGIN MEGALENS OBSERVABILITY
 +    if args.trace and args.skip_samples_range and args.rampup_batch_size is not None:
 +        raise ValueError(
 +            "MegaLens tracing does not support --skip-samples-range with "
 +            "--rampup-batch-size; use --skip-iters-range or a fixed global batch size"
 +        )
++    # END MEGALENS OBSERVABILITY
      while iteration < args.train_iters:
 -        if (args.profile 
 -            and (len(args.profile_ranks) == 0 or
@@ -465,6 +503,7 @@ index d48ddfb2b83a5d9ec775371b903684ecb090f789..983bc4d597bc7cafc5677be5d21c93a6
 -                print_rank_0(
 -                    f"[Sequence Packing] Skipping automatic checkpoint at iteration {iteration} "
 -                    f"(microbatch change: {num_microbatches} -> {get_num_microbatches()})"
++        # BEGIN MEGALENS OBSERVABILITY
 +        skip_iteration = (iteration + 1) in args.iterations_to_skip
 +        range_skip_enabled = bool(args.skip_samples_range or args.skip_iters_range)
 +        trace_iteration = getattr(args, 'trace', False) and not skip_iteration
@@ -887,14 +926,17 @@ index d48ddfb2b83a5d9ec775371b903684ecb090f789..983bc4d597bc7cafc5677be5d21c93a6
 +                                cuda_graph_helper.capture_finished()
 +                            ), "CUDA Graph capture should have been finished."
 +                            cuda_graph_helper.cuda_graph_set_manual_hooks()
++        # END MEGALENS OBSERVABILITY
  
          iteration += 1
 
-@@ -3745,4 +3845,5 @@ def train(
+@@ -3745,4 +3861,7 @@ def train(
          one_logger_utils.finish()
          if args.perform_rl_step:
              rl_utils.rl_inference_interface_shutdown()
++        # BEGIN MEGALENS OBSERVABILITY
 +        shutdown_megalens_runtime(graceful=True)
++        # END MEGALENS OBSERVABILITY
          sys.exit(exit_code)
 
 diff --git a/flagscale/train/megatron/training/utils.py b/flagscale/train/megatron/training/utils.py

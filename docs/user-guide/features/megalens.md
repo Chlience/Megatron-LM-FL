@@ -425,3 +425,15 @@ training entry point. Analyzer options are available through:
 ```bash
 python -m megatron.megalens.analyzer --help
 ```
+
+## Reviewing MegaLens instrumentation
+
+Paired `# BEGIN MEGALENS OBSERVABILITY` and `# END MEGALENS OBSERVABILITY` comments
+identify MegaLens imports, metadata, scope wrappers, and lifecycle hooks in Core, training,
+the shared DualPipeV P2P wait integration, and the FlagScale training overlay. Dedicated Core
+observability modules use one module-level pair. The comments are review markers, not runtime
+switches. A marked scope or wrapper can contain the original training computation or native wait;
+the markers identify the observation integration and do not imply that the entire body was added
+by MegaLens. Independent training compatibility fixes and standalone analysis modules are outside
+this marking convention.
+Import-block markers also carry `# isort: split` so import sorting preserves the paired boundaries.

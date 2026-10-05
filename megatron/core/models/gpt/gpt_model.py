@@ -20,7 +20,11 @@ from megatron.core.models.common.embeddings.rotary_pos_embedding import (
     RotaryEmbedding,
 )
 from megatron.core.models.common.language_module.language_module import LanguageModule
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.observability import trace_scope
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.pipeline_parallel.fine_grained_activation_offload import (
     FineGrainedActivationOffloadingInterface as off_interface,
@@ -578,6 +582,7 @@ class GPTModel(LanguageModule):
             decoder_extra_block_kwargs['input_ids'] = input_ids
 
         # Run decoder.
+        # BEGIN MEGALENS OBSERVABILITY
         with trace_scope("decoder"):
             decoder_output = self.decoder(
                 hidden_states=decoder_input,
@@ -592,6 +597,7 @@ class GPTModel(LanguageModule):
                 padding_mask=padding_mask,
                 **decoder_extra_block_kwargs,
             )
+        # END MEGALENS OBSERVABILITY
         # When mHC + MTP, the decoder returns (contracted, multi-stream).
         # MTP needs multi-stream; lm_head needs contracted.
         if isinstance(decoder_output, tuple):
@@ -600,6 +606,7 @@ class GPTModel(LanguageModule):
             hidden_states = decoder_output
             mhc_multistream = None
 
+        # BEGIN MEGALENS OBSERVABILITY
         with trace_scope("decoder-postprocess"):
             return self._postprocess(
                 hidden_states=hidden_states,
@@ -624,6 +631,7 @@ class GPTModel(LanguageModule):
                 output_processor_context=output_processor_context,
                 mhc_multistream=mhc_multistream,  # FlagScale Modify
             )
+        # END MEGALENS OBSERVABILITY
 
     def _postprocess(
         self,
@@ -760,10 +768,12 @@ class GPTModel(LanguageModule):
                 reshaped = hidden_states.squeeze(1).unsqueeze(0)
                 hidden_states = inference_context.last_token_logits(reshaped).unsqueeze(1)
 
+        # BEGIN MEGALENS OBSERVABILITY
         with trace_scope("output_layer"):
             logits, _ = self.output_layer(
                 hidden_states, weight=output_weight, runtime_gather_output=runtime_gather_output
             )
+        # END MEGALENS OBSERVABILITY
 
         # Apply MuP output scaling to logits
         logits = self._scale_logits(logits)
@@ -793,8 +803,10 @@ class GPTModel(LanguageModule):
             # [s b h] => [b s h]
             return logits.transpose(0, 1).contiguous()
 
+        # BEGIN MEGALENS OBSERVABILITY
         with trace_scope("loss"):
             loss = self.compute_language_model_loss(labels, logits)
+        # END MEGALENS OBSERVABILITY
 
         return loss
 

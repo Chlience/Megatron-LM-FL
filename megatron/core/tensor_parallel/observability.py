@@ -1,6 +1,7 @@
 # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 """Dependency-light trace helpers for direct tensor-parallel Linear collectives."""
 
+# BEGIN MEGALENS OBSERVABILITY
 from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
@@ -243,3 +244,4 @@ __all__ = [
     "sync_linear_all_gather_scope",
     "wait_async_linear_collective",
 ]
+# END MEGALENS OBSERVABILITY

@@ -7,6 +7,7 @@ after argument parsing and provide a predicate that suppresses unsafe regions
 such as CUDA Graph capture or compiler tracing.
 """
 
+# BEGIN MEGALENS OBSERVABILITY
 from __future__ import annotations
 
 import inspect
@@ -283,3 +284,4 @@ __all__ = [
     "trace_is_enabled",
     "trace_scope",
 ]
+# END MEGALENS OBSERVABILITY

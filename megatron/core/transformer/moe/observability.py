@@ -1,6 +1,7 @@
 # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 """Trace metadata helpers for routed MoE phases."""
 
+# BEGIN MEGALENS OBSERVABILITY
 from __future__ import annotations
 
 import math
@@ -441,3 +442,4 @@ __all__ = [
     "set_trace_fields",
     "shared_experts_trace_context",
 ]
+# END MEGALENS OBSERVABILITY

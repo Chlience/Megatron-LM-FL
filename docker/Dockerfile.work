@@ -355,7 +355,7 @@ RUN source /root/miniconda3/etc/profile.d/conda.sh \
         && test "$(git -C "${FLAGSCALE_ROOT}" rev-parse HEAD^{tree})" = "${FLAGSCALE_TREE}"; \
     fi \
     && printf '%s  %s\n' \
-        "6ef640f93df17c9553fd44f2a008a2ef8c5b7b4eecf3fb494822d1a906005c51" "/tmp/flagscale-megalens.patch" \
+        "1c736ab435c430931072017cb4d958f805bd9cc60fef0ffd9a046ae6957e851b" "/tmp/flagscale-megalens.patch" \
         "913b47495a8e58ed4aac8d4c72cede063afbbaa79ed61ee900e90979e9441667" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/arguments.py" \
         "d7c73b0764c4b192cd2e5e3cc46fc2cffbdca3dc3beeef703139e8b3f9b9914e" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/global_vars.py" \
         "d3eace40ed2bbc2e24e51f801201aaaa406a3d68cbde8614981c0643169a36a2" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/training.py" \
@@ -364,9 +364,9 @@ RUN source /root/miniconda3/etc/profile.d/conda.sh \
     && git -C "${FLAGSCALE_ROOT}" apply --check /tmp/flagscale-megalens.patch \
     && git -C "${FLAGSCALE_ROOT}" apply /tmp/flagscale-megalens.patch \
     && printf '%s  %s\n' \
-        "8ae41c3a9397d48b056c7dd4373561c64e82ef7e43ba92a70377dd61d39a63b9" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/arguments.py" \
-        "b1e4ee2eff25440bc1265438c082d53e39061c61d6e979af9828a4e7e7f5ee81" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/global_vars.py" \
-        "23ab0aa9c33b6c56972bc7299c51634fc3826d499bf4cd66695404d962bec883" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/training.py" \
+        "92d165052a803b7cbdb0a07be4543677dd8d2485cb4e010cc0de623c90261f62" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/arguments.py" \
+        "3cd4cc3c6cf1c48fd24a7cfb663a9795c1a82783e6b40b7bba61f4ac12053c4c" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/global_vars.py" \
+        "9f0e179d3b3140f30ca017874d55efe99c80b5ccb55636f63e78815bb1cb7ebe" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/training.py" \
         "e5e6166aca7a7ac7db62e261217cc5e8eb6bdc829d5637c4f5f8cf2094968cf9" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/utils.py" \
         | sha256sum -c - \
     && python -m py_compile \
@@ -389,7 +389,7 @@ RUN source /root/miniconda3/etc/profile.d/conda.sh \
         "${MEGATRON_CODE_PARENT}" \
         "${FLAGSCALE_REVISION}" \
         "${FLAGSCALE_TREE}" \
-        "6ef640f93df17c9553fd44f2a008a2ef8c5b7b4eecf3fb494822d1a906005c51" \
+        "1c736ab435c430931072017cb4d958f805bd9cc60fef0ffd9a046ae6957e851b" \
         "${EMERGING_OPTIMIZERS_REVISION}" \
         "${EMERGING_OPTIMIZERS_WHEEL_SHA256}" \
         "${DEEP_EP_REVISION}" \

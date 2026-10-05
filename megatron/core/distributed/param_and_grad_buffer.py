@@ -8,7 +8,11 @@ import warnings
 from contextlib import nullcontext
 from enum import Enum
 from functools import partial
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from itertools import count
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -17,10 +21,18 @@ from torch.distributed import _coalescing_manager
 
 import megatron.core.nccl_allocator as nccl_allocator
 from megatron.core import parallel_state
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.observability import open_trace_scope, prepare_trace_scope
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.rerun_state_machine import get_rerun_state_machine
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.utils import get_process_group_peer_ranks, log_single_rank
+
+# END MEGALENS OBSERVABILITY  # isort: split
 
 from ..fp4_utils import get_nvfp4_rowwise_packed_shape, is_nvfp4tensor
 from ..fp8_utils import (
@@ -36,6 +48,7 @@ from .reduce_scatter_with_fp32_accumulation import reduce_scatter_with_fp32_accu
 
 logger = logging.getLogger(__name__)
 
+# BEGIN MEGALENS OBSERVABILITY
 _DP_OPERATION_SEQUENCE = count(1)
 
 
@@ -232,6 +245,7 @@ def _dp_grad_sync_completion_context(
         "timing_phase": "stream_dependency",
         "use_distributed_optimizer": bool(use_distributed_optimizer),
     }
+# END MEGALENS OBSERVABILITY
 
 
 try:
@@ -386,7 +400,9 @@ class _ParamAndGradBucketGroup:
     ):
         self.buckets = buckets
         self.ddp_config = ddp_config
+        # BEGIN MEGALENS OBSERVABILITY
         self.collective_group_size = collective_group_size
+        # END MEGALENS OBSERVABILITY
 
         # overlap_param_gather covers the layer-wise optimizer case, which sets
         # overlap_param_gather=True without use_distributed_optimizer.
@@ -555,6 +571,7 @@ class _ParamAndGradBucketGroup:
                     fatal=False,
                 )
 
+    # BEGIN MEGALENS OBSERVABILITY
     def _wait_param_gather_handle(self, *, completion_site: str) -> None:
         """Wait for a pending parameter gather and expose its completion boundary."""
         handle = self.param_gather_handle
@@ -611,6 +628,7 @@ class _ParamAndGradBucketGroup:
             ctx=completion_context,
             slots=("completed", "error_type"),
         )
+    # END MEGALENS OBSERVABILITY
 
     def start_param_sync(self, force_sync: bool = False):
         """
@@ -630,13 +648,16 @@ class _ParamAndGradBucketGroup:
 
         if force_sync:
             if self.param_gather_handle is not None:
+                # BEGIN MEGALENS OBSERVABILITY
                 self._wait_param_gather_handle(completion_site="force_sync")
+                # END MEGALENS OBSERVABILITY
                 self._post_param_sync()
                 return
         else:
             assert self.param_gather_handle is None
 
         async_op = self.ddp_config.overlap_param_gather and not force_sync
+        # BEGIN MEGALENS OBSERVABILITY
         param_gather_gate = prepare_trace_scope("dp-param-all-gather")
         param_gather_context = None
         param_gather_operation_id = None
@@ -660,6 +681,7 @@ class _ParamAndGradBucketGroup:
         param_gather_scope = open_trace_scope(
             param_gather_gate, "dp-param-all-gather", ctx=param_gather_context, slots=("group",)
         )
+        # END MEGALENS OBSERVABILITY
 
         if not self.ddp_config.use_distributed_optimizer:
             # Legacy layer-wise optimizer path: use all_gather for variable-size
@@ -681,6 +703,7 @@ class _ParamAndGradBucketGroup:
             local_rank = self.intra_distributed_optimizer_instance_rank
             group = self.intra_distributed_optimizer_instance_group
             layerwise_work_handles = []
+            # BEGIN MEGALENS OBSERVABILITY
             with param_gather_scope as param_scope:
                 if param_gather_gate is not None:
                     param_scope.set("group", get_process_group_peer_ranks(group))
@@ -728,6 +751,7 @@ class _ParamAndGradBucketGroup:
                     )
                     if async_op and work is not None:
                         layerwise_work_handles.append(work)
+            # END MEGALENS OBSERVABILITY
 
             if async_op:
                 self.param_gather_handle = _LayerwiseAllGatherHandle(layerwise_work_handles)
@@ -755,6 +779,7 @@ class _ParamAndGradBucketGroup:
             # Standard distributed optimizer path: use _coalescing_manager.
             # all_gather_into_tensor writes directly into a contiguous output buffer and
             # does not need a copy-back step, so coalescing works correctly.
+            # BEGIN MEGALENS OBSERVABILITY
             with (
                 param_gather_scope as param_scope,
                 _coalescing_manager(
@@ -782,6 +807,7 @@ class _ParamAndGradBucketGroup:
                         group=self.intra_distributed_optimizer_instance_group,
                         async_op=async_op,
                     )
+            # END MEGALENS OBSERVABILITY
             if async_op:
                 self.param_gather_handle = cm
             else:
@@ -789,8 +815,10 @@ class _ParamAndGradBucketGroup:
                 # (async_op=False) is used, `cm` is not None. Manually set to None for
                 # consistency with prior code.
                 self.param_gather_handle = None
+        # BEGIN MEGALENS OBSERVABILITY
         if async_op and param_gather_operation_id is not None:
             self._param_gather_trace_operation_id = param_gather_operation_id
+        # END MEGALENS OBSERVABILITY
         if force_sync and self.ddp_config.overlap_param_gather:
             self._post_param_sync()
         self.param_gather_dispatched = True
@@ -818,7 +846,9 @@ class _ParamAndGradBucketGroup:
             self.start_param_sync()
 
         if self.param_gather_handle is not None:
+            # BEGIN MEGALENS OBSERVABILITY
             self._wait_param_gather_handle(completion_site="finish_param_sync")
+            # END MEGALENS OBSERVABILITY
             # Dispatch next bucket's asynchronous param AG only if it has not been dispatched yet.
             if self.next_param_gather_bucket_group is not None and not skip_next_bucket_dispatch:
                 if self.next_param_gather_bucket_group.param_gather_dispatched:
@@ -950,6 +980,7 @@ class _ParamAndGradBucketGroup:
 
         # Coalesce communication kernels across buckets in the bucket group.
         grad_reduce_handle = None
+        # BEGIN MEGALENS OBSERVABILITY
         grad_trace_operations = []
         grad_sync_context = None
         use_reduce_scatter = self.ddp_config.use_distributed_optimizer and not force_all_reduce
@@ -1047,6 +1078,7 @@ class _ParamAndGradBucketGroup:
                     torch.distributed.all_reduce(
                         bucket.grad_data, op=reduce_op, group=communication_group, async_op=async_op
                     )
+        # END MEGALENS OBSERVABILITY
 
         # With multiple DistOpt instances, we need to all-reduce across instances.
         if (
@@ -1054,6 +1086,7 @@ class _ParamAndGradBucketGroup:
             and self.ddp_config.num_distributed_optimizer_instances > 1
         ):
             assert self.inter_distributed_optimizer_instance_group is not None
+            # BEGIN MEGALENS OBSERVABILITY
             inter_instance_gate = prepare_trace_scope("dp-allreduce")
             inter_instance_context = None
             if inter_instance_gate is not None:
@@ -1086,7 +1119,9 @@ class _ParamAndGradBucketGroup:
                 ctx=inter_instance_context,
                 slots=("group",),
             )
+            # END MEGALENS OBSERVABILITY
             # Create a new coalescing manager for the inter-instance all-reduce.
+            # BEGIN MEGALENS OBSERVABILITY
             with (
                 inter_instance_scope as inter_scope,
                 stream_context,
@@ -1116,6 +1151,7 @@ class _ParamAndGradBucketGroup:
                         group=self.inter_distributed_optimizer_instance_group,
                         async_op=async_op,
                     )
+            # END MEGALENS OBSERVABILITY
 
         if async_op:
             if self.ddp_config.reduce_scatter_with_fp32_accumulation and not force_all_reduce:
@@ -1135,8 +1171,10 @@ class _ParamAndGradBucketGroup:
             # maintain consistency with prior code, we need to manually set communication handle to
             # None.
             self.grad_reduce_handle = None
+        # BEGIN MEGALENS OBSERVABILITY
         if self.ddp_config.overlap_grad_reduce and grad_trace_operations:
             self._grad_sync_trace_operations = tuple(grad_trace_operations)
+        # END MEGALENS OBSERVABILITY
 
     def finish_grad_sync(self, force_all_reduce: Optional[bool] = False):
         """
@@ -1171,6 +1209,7 @@ class _ParamAndGradBucketGroup:
         # When using multiple DistOpt instances, we don't need to sync here as we launch
         # communications on a separate communication stream.
         if self.ddp_config.num_distributed_optimizer_instances > 1:
+            # BEGIN MEGALENS OBSERVABILITY
             completion_scope = self._grad_sync_completion_scope(
                 completion_kind="stream_join",
                 completion_site="finish_grad_sync",
@@ -1192,6 +1231,7 @@ class _ParamAndGradBucketGroup:
             finally:
                 if join_completed:
                     self._grad_sync_trace_operations = ()
+            # END MEGALENS OBSERVABILITY
             self._copy_back_extra_main_grads()
             self.grad_reduce_finished = True
             return
@@ -1200,6 +1240,7 @@ class _ParamAndGradBucketGroup:
             f"({len(self.per_param_grad_ready_counts)}/{len(self.params)} "
             "params have grad available)"
         )
+        # BEGIN MEGALENS OBSERVABILITY
         completion_scope = self._grad_sync_completion_scope(
             completion_kind="work_wait",
             completion_site="finish_grad_sync",
@@ -1220,6 +1261,7 @@ class _ParamAndGradBucketGroup:
             if wait_completed:
                 self.grad_reduce_handle = None
                 self._grad_sync_trace_operations = ()
+        # END MEGALENS OBSERVABILITY
         self._copy_back_extra_main_grads()
         self.grad_reduce_finished = True
 
@@ -1232,7 +1274,9 @@ class _ParamAndGradBucketGroup:
         the persistent checkpoint worker process.
         """
         if self.param_gather_handle is not None:
+            # BEGIN MEGALENS OBSERVABILITY
             self._wait_param_gather_handle(completion_site="free_overlap_buffers")
+            # END MEGALENS OBSERVABILITY
         for bucket in self.buckets:
             bucket.layerwise_gather_list = None
 

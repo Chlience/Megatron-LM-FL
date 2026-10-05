@@ -8,12 +8,20 @@ import torch
 from torch.autograd.variable import Variable
 
 from megatron.core import parallel_state
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.observability import open_trace_scope, prepare_trace_scope, trace_is_enabled
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.pipeline_parallel.fine_grained_activation_offload import (
     FineGrainedActivationOffloadingInterface as off_interface,
 )
 from megatron.core.pipeline_parallel.multimodule_communicator import MultiModulePipelineCommunicator
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.pipeline_parallel.p2p_communication import P2PCommunicator, wait_p2p_request
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.pipeline_parallel.utils import (
     is_pp_first_stage,
     is_pp_last_stage,
@@ -52,6 +60,7 @@ from .hybrid_cp_schedule import hybrid_context_parallel_forward_backward
 Shape = Union[List[int], torch.Size]
 
 
+# BEGIN MEGALENS OBSERVABILITY
 def _set_pipeline_operation_identity(scope, current_microbatch, vp_stage):
     """Fill operation identity only when the phase scope is active."""
     if scope.get("timing_phase") != "framework_phase":
@@ -144,6 +153,7 @@ def _pipeline_grad_sync_scope(schedule):
     gate = prepare_trace_scope("grad-sync")
     ctx = _pipeline_grad_sync_context(schedule) if gate is not None else None
     return open_trace_scope(gate, "grad-sync", ctx=ctx)
+# END MEGALENS OBSERVABILITY
 
 
 def get_forward_backward_func(pp_size: Optional[int] = None, vp_size: Optional[int] = None):
@@ -464,10 +474,12 @@ def forward_step(
     vp_stage=None,
     is_last_stage=True,
     *,
+    # BEGIN MEGALENS OBSERVABILITY
     record_pipeline_workload=False,
     backward_workload_queue=None,
     workload_fallback_num_tokens=0,
     workload_tp_group_size=1,
+    # END MEGALENS OBSERVABILITY
 ):
     """Forward step for passed-in model.
 
@@ -546,6 +558,7 @@ def forward_step(
     if config.timers is not None:
         config.timers('forward-compute', log_level=2).start()
 
+    # BEGIN MEGALENS OBSERVABILITY
     with _pipeline_phase_scope(
         "forward-step",
         current_microbatch=current_microbatch,
@@ -629,6 +642,7 @@ def forward_step(
         if unwrap_output_tensor:
             return output_tensor, num_tokens
         return [output_tensor], num_tokens
+    # END MEGALENS OBSERVABILITY
 
 
 def backward_step(
@@ -637,11 +651,13 @@ def backward_step(
     output_tensor_grad,
     config,
     *,
+    # BEGIN MEGALENS OBSERVABILITY
     current_microbatch=None,
     vp_stage=None,
     is_first_microbatch=None,
     is_last_stage=None,
     pipeline_workload=None,
+    # END MEGALENS OBSERVABILITY
 ):
     """Backward step through passed-in output tensor.
 
@@ -657,6 +673,7 @@ def backward_step(
     if config.timers is not None:
         config.timers('backward-compute', log_level=2).start()
 
+    # BEGIN MEGALENS OBSERVABILITY
     with _pipeline_phase_scope(
         "backward-step",
         current_microbatch=current_microbatch,
@@ -714,6 +731,7 @@ def backward_step(
             config.timers('backward-compute').stop()
 
         return input_tensor_grad
+    # END MEGALENS OBSERVABILITY
 
 
 def backward_step_multimodule(
@@ -723,10 +741,12 @@ def backward_step_multimodule(
     config,
     language_model_module_name: str,
     *,
+    # BEGIN MEGALENS OBSERVABILITY
     current_microbatch=None,
     vp_stage=None,
     is_first_microbatch=None,
     is_last_stage=None,
+    # END MEGALENS OBSERVABILITY
 ) -> Dict[str, torch.Tensor]:
     """Backward step for multi-module pipelines.
 
@@ -740,6 +760,7 @@ def backward_step_multimodule(
             return tensor[0]
         return tensor
 
+    # BEGIN MEGALENS OBSERVABILITY
     with _pipeline_phase_scope(
         "backward-step",
         current_microbatch=current_microbatch,
@@ -798,6 +819,7 @@ def backward_step_multimodule(
                 input_tensor_grad[module_name] = tensor.grad
 
         return input_tensor_grad
+    # END MEGALENS OBSERVABILITY
 
 
 def check_first_val_step(first_val_step, forward_only, cond):
@@ -915,12 +937,15 @@ def forward_backward_no_pipelining(
             model_type,
         )
     else:
+        # BEGIN MEGALENS OBSERVABILITY
         backward_workloads = (
             [] if not forward_only and trace_is_enabled("backward-step") else None
         )
         workload_tp_group_size = pg_collection.tp.size()
+        # END MEGALENS OBSERVABILITY
         with no_sync_func():
             for i in range(num_microbatches - 1):
+                # BEGIN MEGALENS OBSERVABILITY
                 output_tensor, num_tokens = forward_step(
                     forward_step_func,
                     data_iterator,
@@ -938,8 +963,10 @@ def forward_backward_no_pipelining(
                     workload_fallback_num_tokens=micro_batch_size * seq_length,
                     workload_tp_group_size=workload_tp_group_size,
                 )
+                # END MEGALENS OBSERVABILITY
                 total_num_tokens += num_tokens
                 if not forward_only:
+                    # BEGIN MEGALENS OBSERVABILITY
                     backward_step(
                         input_tensor,
                         output_tensor,
@@ -954,6 +981,7 @@ def forward_backward_no_pipelining(
                             else None
                         ),
                     )
+                    # END MEGALENS OBSERVABILITY
                     # Release the autograd graph head before the next forward_step.
                     # Without this, the previous microbatch's output_tensor stays
                     # live until the next iteration rebinds the variable, deferring
@@ -963,6 +991,7 @@ def forward_backward_no_pipelining(
                     del output_tensor
         # Run computation for last microbatch out of context handler (want to
         # synchronize gradients).
+        # BEGIN MEGALENS OBSERVABILITY
         output_tensor, num_tokens = forward_step(
             forward_step_func,
             data_iterator,
@@ -982,10 +1011,12 @@ def forward_backward_no_pipelining(
             workload_fallback_num_tokens=micro_batch_size * seq_length,
             workload_tp_group_size=workload_tp_group_size,
         )
+        # END MEGALENS OBSERVABILITY
 
         total_num_tokens += num_tokens
 
         if not forward_only:
+            # BEGIN MEGALENS OBSERVABILITY
             backward_step(
                 input_tensor,
                 output_tensor,
@@ -998,11 +1029,13 @@ def forward_backward_no_pipelining(
                     backward_workloads.pop(0) if backward_workloads is not None else None
                 ),
             )
+            # END MEGALENS OBSERVABILITY
             del output_tensor
 
     if config.finalize_model_grads_func is not None and not forward_only:
         # Finalize model grads (perform full grad all-reduce / reduce-scatter for
         # data parallelism and layernorm all-reduce for sequence parallelism).
+        # BEGIN MEGALENS OBSERVABILITY
         with _pipeline_grad_sync_scope("no-pipelining"):
             config.finalize_model_grads_func(
                 [model],
@@ -1010,6 +1043,7 @@ def forward_backward_no_pipelining(
                 pg_collection=pg_collection,
                 force_all_reduce=force_all_reduce,
             )
+        # END MEGALENS OBSERVABILITY
 
     if getattr(config, 'fine_grained_activation_offloading', False):
         off_interface.reset()
@@ -1301,6 +1335,7 @@ def forward_backward_pipelining_with_interleaving(
 
     input_tensors = [[] for _ in range(len(model))]
     output_tensors = [[] for _ in range(len(model))]
+    # BEGIN MEGALENS OBSERVABILITY
     record_pipeline_workload = forward_only or not config.overlap_moe_expert_parallel_comm
     backward_workloads = (
         [[] for _ in model]
@@ -1310,6 +1345,7 @@ def forward_backward_pipelining_with_interleaving(
         else None
     )
     workload_tp_group_size = tp_group.size() if record_pipeline_workload else 1
+    # END MEGALENS OBSERVABILITY
     total_num_tokens = torch.zeros(
         [], dtype=torch.int, device=cur_platform.device_name()
     )  # FlagScale Add
@@ -1425,7 +1461,9 @@ def forward_backward_pipelining_with_interleaving(
 
     def get_microbatch_id_in_model_chunk(iteration_id, forward):
         """Helper method to get the microbatch_id within model chunk given the iteration number."""
+        # BEGIN MEGALENS OBSERVABILITY
         microbatch_id_in_model_chunk = microbatch_id_table[iteration_id % total_num_microbatches]
+        # END MEGALENS OBSERVABILITY
         return microbatch_id_in_model_chunk
 
     def num_released_microbatches(virtual_microbatch_id, model_chunk_id):
@@ -1565,6 +1603,7 @@ def forward_backward_pipelining_with_interleaving(
             virtual_microbatch_id, model_chunk_id, microbatch_id
         )
 
+        # BEGIN MEGALENS OBSERVABILITY
         output_tensor, num_tokens = forward_step(
             forward_step_func,
             data_iterator[model_chunk_id],
@@ -1591,6 +1630,7 @@ def forward_backward_pipelining_with_interleaving(
             workload_fallback_num_tokens=micro_batch_size * seq_length,
             workload_tp_group_size=workload_tp_group_size,
         )
+        # END MEGALENS OBSERVABILITY
 
         forward_step_helper_postprocess(model_chunk_id, output_tensor, num_tokens)
 
@@ -1639,12 +1679,15 @@ def forward_backward_pipelining_with_interleaving(
         """Helper method to run backward step with model split into chunks"""
         nonlocal output_tensor_grads
         model_chunk_id = get_model_chunk_id(virtual_microbatch_id, forward=False)
+        # BEGIN MEGALENS OBSERVABILITY
         microbatch_id = get_microbatch_id_in_model_chunk(virtual_microbatch_id, forward=False)
+        # END MEGALENS OBSERVABILITY
 
         input_tensor, output_tensor, output_tensor_grad = backward_step_helper_preprocess(
             virtual_microbatch_id, model_chunk_id
         )
 
+        # BEGIN MEGALENS OBSERVABILITY
         input_tensor_grad = backward_step(
             input_tensor,
             output_tensor,
@@ -1662,6 +1705,7 @@ def forward_backward_pipelining_with_interleaving(
                 else None
             ),
         )
+        # END MEGALENS OBSERVABILITY
 
         backward_step_helper_postprocess(virtual_microbatch_id)
 
@@ -1782,7 +1826,9 @@ def forward_backward_pipelining_with_interleaving(
                     'should have registered recv handle'
                 )
                 recv_prev_wait_handle = recv_prev_wait_handles.pop(0)
+                # BEGIN MEGALENS OBSERVABILITY
                 wait_p2p_request(p2p_communicator, recv_prev_wait_handle)
+                # END MEGALENS OBSERVABILITY
 
         # Determine if tensor should be received from previous stage.
         recv_prev, next_forward_model_chunk_id = recv_tensor_from_previous_stage(k, forward=True)
@@ -1871,7 +1917,9 @@ def forward_backward_pipelining_with_interleaving(
                     )
                 )
             if send_next_wait_handle is not None:
+                # BEGIN MEGALENS OBSERVABILITY
                 wait_p2p_request(p2p_communicator, send_next_wait_handle)
+                # END MEGALENS OBSERVABILITY
             if fwd_wait_handles is not None:
                 send_next_wait_handle = (
                     fwd_wait_handles.pop("send_next") if "send_next" in fwd_wait_handles else None
@@ -1911,7 +1959,9 @@ def forward_backward_pipelining_with_interleaving(
                     )
                 )
                 if send_prev_wait_handle is not None:
+                    # BEGIN MEGALENS OBSERVABILITY
                     wait_p2p_request(p2p_communicator, send_prev_wait_handle)
+                    # END MEGALENS OBSERVABILITY
                 if bwd_wait_handles is not None:
                     send_prev_wait_handle = (
                         bwd_wait_handles.pop("send_prev")
@@ -1956,11 +2006,15 @@ def forward_backward_pipelining_with_interleaving(
                             'should have registered recv handle'
                         )
                         recv_prev_wait_handle = recv_prev_wait_handles.pop(0)
+                        # BEGIN MEGALENS OBSERVABILITY
                         wait_p2p_request(p2p_communicator, recv_prev_wait_handle)
+                        # END MEGALENS OBSERVABILITY
                     else:
                         if recv_prev_wait_handles is not None and recv_prev_wait_handles:
                             recv_prev_wait_handle = recv_prev_wait_handles.pop(0)
+                            # BEGIN MEGALENS OBSERVABILITY
                             wait_p2p_request(p2p_communicator, recv_prev_wait_handle)
+                            # END MEGALENS OBSERVABILITY
 
                 deallocate_output_tensor(output_tensor, config.deallocate_pipeline_outputs)
 
@@ -1996,7 +2050,9 @@ def forward_backward_pipelining_with_interleaving(
                     )
                 )
                 if send_next_wait_handle is not None:
+                    # BEGIN MEGALENS OBSERVABILITY
                     wait_p2p_request(p2p_communicator, send_next_wait_handle)
+                    # END MEGALENS OBSERVABILITY
                 if fwd_wait_handles is not None:
                     send_next_wait_handle = (
                         fwd_wait_handles.pop("send_next")
@@ -2034,11 +2090,15 @@ def forward_backward_pipelining_with_interleaving(
                             'should have registered recv next handle'
                         )
                         recv_next_wait_handle = recv_next_wait_handles.pop(0)
+                        # BEGIN MEGALENS OBSERVABILITY
                         wait_p2p_request(p2p_communicator, recv_next_wait_handle)
+                        # END MEGALENS OBSERVABILITY
                     else:
                         if recv_next_wait_handles is not None and recv_next_wait_handles:
                             recv_next_wait_handle = recv_next_wait_handles.pop(0)
+                            # BEGIN MEGALENS OBSERVABILITY
                             wait_p2p_request(p2p_communicator, recv_next_wait_handle)
+                            # END MEGALENS OBSERVABILITY
 
             # Async backward send / receive
             def pp_post_backward(input_tensor_grad, vp_stage=None):
@@ -2064,7 +2124,9 @@ def forward_backward_pipelining_with_interleaving(
                     )
                 )
                 if send_prev_wait_handle is not None:
+                    # BEGIN MEGALENS OBSERVABILITY
                     wait_p2p_request(p2p_communicator, send_prev_wait_handle)
+                    # END MEGALENS OBSERVABILITY
                 if bwd_wait_handles is not None:
                     send_prev_wait_handle = (
                         bwd_wait_handles.pop("send_prev")
@@ -2154,7 +2216,9 @@ def forward_backward_pipelining_with_interleaving(
     if not forward_only:
         if bwd_wait_handles is not None:
             for bwd_wait_handle in bwd_wait_handles.values():
+                # BEGIN MEGALENS OBSERVABILITY
                 wait_p2p_request(p2p_communicator, bwd_wait_handle)
+                # END MEGALENS OBSERVABILITY
 
         if are_all_microbatches_in_warmup:
             output_tensor_grads[num_model_chunks - 1].append(
@@ -2177,11 +2241,15 @@ def forward_backward_pipelining_with_interleaving(
                         'should have registered recv next handle'
                     )
                     recv_next_wait_handle = recv_next_wait_handles.pop(0)
+                    # BEGIN MEGALENS OBSERVABILITY
                     wait_p2p_request(p2p_communicator, recv_next_wait_handle)
+                    # END MEGALENS OBSERVABILITY
                 else:
                     if recv_next_wait_handles is not None and recv_next_wait_handles:
                         recv_next_wait_handle = recv_next_wait_handles.pop(0)
+                        # BEGIN MEGALENS OBSERVABILITY
                         wait_p2p_request(p2p_communicator, recv_next_wait_handle)
+                        # END MEGALENS OBSERVABILITY
 
             recv_next, next_backward_model_chunk_id = recv_tensor_from_previous_stage(
                 k, forward=False
@@ -2231,7 +2299,9 @@ def forward_backward_pipelining_with_interleaving(
                     )
 
                 if send_prev_wait_handle is not None:
+                    # BEGIN MEGALENS OBSERVABILITY
                     wait_p2p_request(p2p_communicator, send_prev_wait_handle)
+                    # END MEGALENS OBSERVABILITY
                 if bwd_wait_handles is not None:
                     send_prev_wait_handle = (
                         bwd_wait_handles.pop("send_prev")
@@ -2255,7 +2325,9 @@ def forward_backward_pipelining_with_interleaving(
                     output_tensor_grads[next_backward_model_chunk_id].append(output_tensor_grad)
 
         if send_prev_wait_handle is not None:
+            # BEGIN MEGALENS OBSERVABILITY
             wait_p2p_request(p2p_communicator, send_prev_wait_handle)
+            # END MEGALENS OBSERVABILITY
 
         # Launch any remaining grad reductions.
         enable_grad_sync()
@@ -2286,6 +2358,7 @@ def forward_backward_pipelining_with_interleaving(
         # data parallelism, layernorm all-reduce for sequence parallelism, and
         # embedding all-reduce for pipeline parallelism).
 
+        # BEGIN MEGALENS OBSERVABILITY
         with _pipeline_grad_sync_scope("interleaved-1f1b"):
             config.finalize_model_grads_func(
                 model,
@@ -2293,6 +2366,7 @@ def forward_backward_pipelining_with_interleaving(
                 pg_collection=pg_collection,
                 force_all_reduce=force_all_reduce,
             )
+        # END MEGALENS OBSERVABILITY
 
     if getattr(config, 'fine_grained_activation_offloading', False):
         off_interface.reset()
@@ -2535,12 +2609,14 @@ def forward_backward_pipelining_without_interleaving(
     # Input, output tensors only need to be saved when doing backward passes
     input_tensors = None
     output_tensors = None
+    # BEGIN MEGALENS OBSERVABILITY
     backward_workloads = (
         []
         if not forward_only and not is_multimodule and trace_is_enabled("backward-step")
         else None
     )
     workload_tp_group_size = tp_group.size() if not is_multimodule else 1
+    # END MEGALENS OBSERVABILITY
     total_num_tokens = torch.zeros(
         [], dtype=torch.int, device=cur_platform.device_name()
     )  # FlagScale Add
@@ -2569,6 +2645,7 @@ def forward_backward_pipelining_without_interleaving(
         input_tensor = p2p_communicator.recv_forward(
             recv_tensor_shapes, p2p_communicator.is_pp_first_stage
         )
+        # BEGIN MEGALENS OBSERVABILITY
         output_tensor, num_tokens = forward_step(
             forward_step_func,
             data_iterator,
@@ -2588,6 +2665,7 @@ def forward_backward_pipelining_without_interleaving(
             workload_fallback_num_tokens=micro_batch_size * seq_length,
             workload_tp_group_size=workload_tp_group_size,
         )
+        # END MEGALENS OBSERVABILITY
         p2p_communicator.send_forward(output_tensor, p2p_communicator.is_pp_last_stage)
         total_num_tokens += num_tokens
 
@@ -2616,6 +2694,7 @@ def forward_backward_pipelining_without_interleaving(
         else:
             checkpoint_activations_microbatch = None
 
+        # BEGIN MEGALENS OBSERVABILITY
         output_tensor, num_tokens = forward_step(
             forward_step_func,
             data_iterator,
@@ -2637,6 +2716,7 @@ def forward_backward_pipelining_without_interleaving(
             workload_fallback_num_tokens=micro_batch_size * seq_length,
             workload_tp_group_size=workload_tp_group_size,
         )
+        # END MEGALENS OBSERVABILITY
         total_num_tokens += num_tokens
 
         if forward_only:
@@ -2666,6 +2746,7 @@ def forward_backward_pipelining_without_interleaving(
                 if config.grad_sync_func is None or p2p_communicator.is_pp_first_stage:
                     enable_grad_sync()
 
+            # BEGIN MEGALENS OBSERVABILITY
             backward_kwargs = {
                 "current_microbatch": i,
                 "is_first_microbatch": i == 0,
@@ -2676,6 +2757,7 @@ def forward_backward_pipelining_without_interleaving(
             input_tensor_grad = backward_func(
                 input_tensor, output_tensor, output_tensor_grad, config, **backward_kwargs
             )
+            # END MEGALENS OBSERVABILITY
 
             if last_iteration:
                 input_tensor = None
@@ -2707,6 +2789,7 @@ def forward_backward_pipelining_without_interleaving(
                 send_tensor_shapes, p2p_communicator.is_pp_last_stage
             )
 
+            # BEGIN MEGALENS OBSERVABILITY
             backward_microbatch = num_microbatches_remaining + i
             backward_kwargs = {
                 "current_microbatch": backward_microbatch,
@@ -2718,6 +2801,7 @@ def forward_backward_pipelining_without_interleaving(
             input_tensor_grad = backward_func(
                 input_tensor, output_tensor, output_tensor_grad, config, **backward_kwargs
             )
+            # END MEGALENS OBSERVABILITY
 
             p2p_communicator.send_backward(input_tensor_grad, p2p_communicator.is_pp_first_stage)
 
@@ -2738,6 +2822,7 @@ def forward_backward_pipelining_without_interleaving(
         # Finalize model grads (perform full grad all-reduce / reduce-scatter for
         # data parallelism, layernorm all-reduce for sequence parallelism, and
         # embedding all-reduce for pipeline parallelism).
+        # BEGIN MEGALENS OBSERVABILITY
         with _pipeline_grad_sync_scope("non-interleaved-1f1b"):
             config.finalize_model_grads_func(
                 [model],
@@ -2745,6 +2830,7 @@ def forward_backward_pipelining_without_interleaving(
                 pg_collection=pg_collection,
                 force_all_reduce=force_all_reduce,
             )
+        # END MEGALENS OBSERVABILITY
 
     if getattr(config, 'fine_grained_activation_offloading', False):
         off_interface.reset()

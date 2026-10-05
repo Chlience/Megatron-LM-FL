@@ -14,7 +14,11 @@ from megatron.core.models.bert.pooler import Pooler
 from megatron.core.models.common.embeddings.language_model_embedding import LanguageModelEmbedding
 from megatron.core.models.common.embeddings.rotary_pos_embedding import RotaryEmbedding
 from megatron.core.models.common.language_module.language_module import LanguageModule
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.observability import trace_scope
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.transformer.attention import SelfAttentionSubmodules
 from megatron.core.transformer.dot_product_attention import (
@@ -27,6 +31,7 @@ from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import TransformerLayerSubmodules
 from megatron.core.transformer.utils import get_linear_layer
 from megatron.core.utils import deprecate_inference_params, is_te_min_version
+
 ######## FlagScale Begin ########
 from megatron.plugin.platform import get_platform
 
@@ -349,6 +354,7 @@ class BertModel(LanguageModule):
             rotary_pos_emb = self.rotary_pos_emb(rotary_seq_len)
 
         # Run encoder.
+        # BEGIN MEGALENS OBSERVABILITY
         with trace_scope("encoder"):
             hidden_states = self.encoder(
                 hidden_states=encoder_input,
@@ -356,6 +362,7 @@ class BertModel(LanguageModule):
                 inference_context=inference_context,
                 rotary_pos_emb=rotary_pos_emb,
             )
+        # END MEGALENS OBSERVABILITY
         if not self.post_process:
             return hidden_states
 

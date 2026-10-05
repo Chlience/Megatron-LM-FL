@@ -8,7 +8,11 @@ import json
 import os
 import re
 import types
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 import warnings
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from pathlib import Path
 
 import torch
@@ -90,13 +94,16 @@ def add_megatron_arguments(parser: argparse.ArgumentParser):
     parser = _add_msc_args(parser)
     parser = _add_kitchen_quantization_arguments(parser)
     parser = _add_sft_args(parser)
+    # BEGIN MEGALENS OBSERVABILITY
     parser = _add_megalens_args(parser)
+    # END MEGALENS OBSERVABILITY
 
     parser = _add_fault_injector_args(parser)
 
     return parser
 
 
+# BEGIN MEGALENS OBSERVABILITY
 def _add_megalens_args(parser):
     group = parser.add_argument_group(title='megalens')
     group.add_argument(
@@ -179,6 +186,7 @@ def _validate_megalens_args(args):
         raise ValueError(
             'MegaLens kernel capture cannot nest the Megatron PyTorch profiler'
         )
+# END MEGALENS OBSERVABILITY
 
 
 def parse_and_validate_args(extra_args_provider=None, ignore_unknown_args=False, args_defaults={}):
@@ -484,7 +492,9 @@ def tuple_type(x):
 
 def validate_args(args, defaults={}):
 
+    # BEGIN MEGALENS OBSERVABILITY
     _validate_megalens_args(args)
+    # END MEGALENS OBSERVABILITY
     # Prep for checkpoint conversion.
     if args.ckpt_convert_format is not None:
         assert args.ckpt_convert_save is not None

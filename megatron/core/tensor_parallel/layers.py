@@ -40,11 +40,15 @@ from .mappings import (
     reduce_scatter_to_sequence_parallel_region,
     scatter_to_tensor_model_parallel_region,
 )
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from .observability import (
     async_linear_collective_launch_scope,
     sync_linear_all_gather_scope,
     wait_async_linear_collective,
 )
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from .random import get_cuda_rng_tracker, get_expert_parallel_rng_tracker_name
 from .utils import VocabUtility
 
@@ -512,8 +516,10 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
             dim_size[0] = dim_size[0] * tp_group.size()
 
             all_gather_buffer = get_global_memory_buffer().get_tensor(dim_size, input.dtype, "mpu")
+            # BEGIN MEGALENS OBSERVABILITY
             with sync_linear_all_gather_scope(input, tp_group):
                 dist_all_gather_func(all_gather_buffer, input, group=tp_group)
+            # END MEGALENS OBSERVABILITY
             total_input = all_gather_buffer
         else:
             total_input = input
@@ -533,8 +539,10 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
         grad_output_buffer = ctx.grad_output_buffer
         wgrad_deferral_limit = ctx.wgrad_deferral_limit
         handle = None
+        # BEGIN MEGALENS OBSERVABILITY
         wgrad_all_gather_observation = None
         dgrad_observation = None
+        # END MEGALENS OBSERVABILITY
         tp_group = ctx.tp_group
 
         if ctx.gradient_accumulation_fusion:
@@ -554,6 +562,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
                 all_gather_buffer = get_global_memory_buffer().get_tensor(
                     dim_size, input.dtype, "mpu"
                 )
+                # BEGIN MEGALENS OBSERVABILITY
                 with async_linear_collective_launch_scope(
                     input,
                     tp_group,
@@ -565,6 +574,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
                     handle = dist_all_gather_func(
                         all_gather_buffer, input, group=tp_group, async_op=True
                     )
+                # END MEGALENS OBSERVABILITY
 
                 # Here we rely on CUDA_DEVICE_MAX_CONNECTIONS=1 to ensure that the
                 # gather is scheduled before the input gradient computation
@@ -575,6 +585,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
 
         if ctx.sequence_parallel and wgrad_compute:
             # pylint: disable=possibly-used-before-assignment
+            # BEGIN MEGALENS OBSERVABILITY
             wait_async_linear_collective(
                 handle,
                 wgrad_all_gather_observation,
@@ -582,6 +593,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
                 wait_role="dependency",
                 terminal=True,
             )
+            # END MEGALENS OBSERVABILITY
 
         if wgrad_compute:
             grad_output, total_input = prepare_input_tensors_for_wgrad_compute(
@@ -590,6 +602,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
 
         if ctx.allreduce_dgrad:
             # Asynchronous all-reduce
+            # BEGIN MEGALENS OBSERVABILITY
             with async_linear_collective_launch_scope(
                 grad_input,
                 tp_group,
@@ -599,6 +612,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
                 payload_role="input_gradient",
             ) as dgrad_observation:
                 handle = torch.distributed.all_reduce(grad_input, group=tp_group, async_op=True)
+            # END MEGALENS OBSERVABILITY
             # Here we rely on CUDA_DEVICE_MAX_CONNECTIONS=1 to ensure that the
             # all-reduce is scheduled before the weight gradient computation
 
@@ -614,6 +628,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
                 ######## FlagScale End ########
             )
             # reduce_scatter
+            # BEGIN MEGALENS OBSERVABILITY
             with async_linear_collective_launch_scope(
                 grad_input,
                 tp_group,
@@ -625,6 +640,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
                 handle = dist_reduce_scatter_func(
                     sub_grad_input, grad_input, group=tp_group, async_op=True
                 )
+            # END MEGALENS OBSERVABILITY
             # Here we rely on CUDA_DEVICE_MAX_CONNECTIONS=1 to ensure that the
             # reduce scatter is scheduled before the weight gradient computation
 
@@ -714,6 +730,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
         grad_bias = grad_output.sum(dim=0) if use_bias else None
 
         if ctx.sequence_parallel:
+            # BEGIN MEGALENS OBSERVABILITY
             wait_async_linear_collective(
                 handle,
                 dgrad_observation,
@@ -721,6 +738,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
                 wait_role="return",
                 terminal=True,
             )
+            # END MEGALENS OBSERVABILITY
             # Need to return None's as gradient has to flow for all the input arguments
             # provided during forward
             ######## FlagScale Begin ########
@@ -739,6 +757,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
             ######## FlagScale End ########
 
         if ctx.allreduce_dgrad:
+            # BEGIN MEGALENS OBSERVABILITY
             wait_async_linear_collective(
                 handle,
                 dgrad_observation,
@@ -746,6 +765,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
                 wait_role="return",
                 terminal=True,
             )
+            # END MEGALENS OBSERVABILITY
 
         return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None  # FlagScale Modify
 

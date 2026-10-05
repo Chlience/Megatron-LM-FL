@@ -157,7 +157,11 @@ from megatron.core.distributed import (
 from megatron.core.distributed.fsdp.mcore_fsdp_adapter import (
     FullyShardedDataParallel as megatron_FSDP,
 )
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.observability import trace_scope
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.optimizer import get_mup_config_overrides, get_standard_config_overrides
 from megatron.core.optimizer.optimizer import param_group_identifier_keys
 from megatron.core.optimizer.optimizer_cuda_graph import OptimizerCudaGraphWrapper
@@ -259,6 +263,8 @@ from .activation_logging import (
 )
 from .async_utils import maybe_finalize_async_save
 from .dgrad_logging import disable_dgrad_logging, enable_dgrad_logging, save_dgrads
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from .global_vars import (
     destroy_global_vars,
     get_args,
@@ -272,6 +278,8 @@ from .global_vars import (
     get_wandb_writer,
     shutdown_megalens_runtime,
 )
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from .utils import (
     append_to_progress_log,
     calc_params_l2_norm,
@@ -1034,6 +1042,7 @@ def preprocess_common_state_dict(common_state_dict):
     return preprocessed_common_state_dict
 
 
+# BEGIN MEGALENS OBSERVABILITY
 def _owns_megalens_runtime(pretrain_func):
     """Ensure failures across the pretrain lifecycle close MegaLens."""
 
@@ -1056,6 +1065,7 @@ def _owns_megalens_runtime(pretrain_func):
 
 
 @_owns_megalens_runtime
+# END MEGALENS OBSERVABILITY
 def pretrain(
     cfg_container: PretrainConfigContainer,
     train_valid_test_dataset_provider,
@@ -2322,8 +2332,10 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     # Update parameters.
 
     timers('optimizer', log_level=1).start(barrier=args.barrier_with_L1_time)
+    # BEGIN MEGALENS OBSERVABILITY
     with trace_scope('optimizer'):
         update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
+    # END MEGALENS OBSERVABILITY
 
     # get max attention logit for logging and run clip_qk()
     # Part of MuonClip Optimizer step
@@ -2337,6 +2349,7 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     if save_params_in_this_iteration:
         _save_state_dict(attr_name="data", label="params")
 
+    # BEGIN MEGALENS OBSERVABILITY
     with trace_scope('optimizer-postprocess'):
         # when freezing sub-models we may have a mixture of successful and unsucessful ranks,
         # so we must gather across mp ranks
@@ -2404,6 +2417,7 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
             num_zeros_in_grad,
             log_max_attention_logit,
         )
+    # END MEGALENS OBSERVABILITY
 
 
 def training_log(
@@ -3447,6 +3461,7 @@ def train(
     # Run training iterations till done.
     buffered_rollouts = None
     while iteration < args.train_iters:
+        # BEGIN MEGALENS OBSERVABILITY
         skip_iteration = (iteration + 1) in args.iterations_to_skip
         if skip_iteration and getattr(args, 'trace', False):
             get_megalens_runtime().tracer.close_trace_window()
@@ -3645,6 +3660,7 @@ def train(
                                 cuda_graph_helper.capture_finished()
                             ), "CUDA Graph capture should have been finished."
                             cuda_graph_helper.cuda_graph_set_manual_hooks()
+        # END MEGALENS OBSERVABILITY
 
         iteration += 1
 
@@ -3882,7 +3898,9 @@ def train(
         one_logger_utils.finish()
         if args.perform_rl_step:
             rl_utils.rl_inference_interface_shutdown()
+        # BEGIN MEGALENS OBSERVABILITY
         shutdown_megalens_runtime(graceful=True)
+        # END MEGALENS OBSERVABILITY
         sys.exit(exit_code)
 
     return iteration, num_floating_point_operations_so_far

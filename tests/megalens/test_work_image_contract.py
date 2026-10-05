@@ -75,7 +75,7 @@ def test_flagscale_patch_preserves_graph_compatibility_and_is_pinned() -> None:
     ) in patch
     assert patch.count("if broadcast_packed_sequence_metadata:") == 5
     assert (
-        '"8ae41c3a9397d48b056c7dd4373561c64e82ef7e43ba92a70377dd61d39a63b9" '
+        '"92d165052a803b7cbdb0a07be4543677dd8d2485cb4e010cc0de623c90261f62" '
         '"${FLAGSCALE_ROOT}/flagscale/train/megatron/training/arguments.py"'
     ) in dockerfile
     assert (
@@ -180,7 +180,7 @@ def test_flagscale_range_skip_traces_only_the_actual_training_iteration() -> Non
     assert "MegaLens tracing does not support --skip-samples-range" in patch
     assert "if trace_iteration and not range_skip_enabled:" not in patch
     assert (
-        '"23ab0aa9c33b6c56972bc7299c51634fc3826d499bf4cd66695404d962bec883" '
+        '"9f0e179d3b3140f30ca017874d55efe99c80b5ccb55636f63e78815bb1cb7ebe" '
         '"${FLAGSCALE_ROOT}/flagscale/train/megatron/training/training.py"'
         in dockerfile
     )
@@ -190,6 +190,7 @@ def test_flagscale_controlled_exit_flushes_megalens_before_system_exit() -> None
     patch = _FLAGSCALE_PATCH.read_text(encoding="utf-8")
     assert (
         "+        shutdown_megalens_runtime(graceful=True)\n"
+        "+        # END MEGALENS OBSERVABILITY\n"
         "         sys.exit(exit_code)"
         in patch
     )

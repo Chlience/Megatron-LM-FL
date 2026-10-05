@@ -9,7 +9,11 @@ import torch
 from megatron.core.distributed.fsdp.src.megatron_fsdp.utils import find_megatron_fsdp
 from megatron.core.enums import Fp8Recipe
 from megatron.core.fp8_utils import get_fp8_context
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.observability import scoped_forward
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.pipeline_parallel.utils import (
     AbstractSchedulePlan,
     ScheduleNode,
@@ -22,6 +26,7 @@ from megatron.core.utils import get_attr_wrapped_model
 Shape = Union[List[int], torch.Size]
 
 
+# BEGIN MEGALENS OBSERVABILITY
 def _combined_operation_id(microbatch, vp_stage):
     if microbatch is None:
         return None
@@ -116,6 +121,7 @@ def _combined_step_context(
         f_vp_stage=f_model_chunk_id,
         b_vp_stage=b_model_chunk_id,
     )
+# END MEGALENS OBSERVABILITY
 
 
 def combined_1f1b_schedule_for_no_pipelining(
@@ -183,6 +189,7 @@ def combined_1f1b_schedule_for_no_pipelining(
     with no_sync_func():
         for i in range(num_microbatches - 1):
             total_num_tokens += num_tokens
+            # BEGIN MEGALENS OBSERVABILITY
             output_tensor, num_tokens, _ = combined_forward_backward_step(
                 forward_step_func,
                 data_iterator,
@@ -202,9 +209,11 @@ def combined_1f1b_schedule_for_no_pipelining(
                 backward_microbatch=i,
                 fsdp_wrapper=fsdp_wrapper,
             )
+            # END MEGALENS OBSERVABILITY
     total_num_tokens += num_tokens
     # The backward step for the last microbatch is executed alone, no a2a overlapping
     # Run computation for last microbatch out of context handler (want to synchronize gradients).
+    # BEGIN MEGALENS OBSERVABILITY
     output_tensor, num_tokens, _ = combined_forward_backward_step(
         forward_step_func,
         data_iterator,
@@ -220,6 +229,7 @@ def combined_1f1b_schedule_for_no_pipelining(
         backward_microbatch=num_microbatches - 1,
         fsdp_wrapper=fsdp_wrapper,
     )
+    # END MEGALENS OBSERVABILITY
     return forward_data_store, total_num_tokens
 
 
@@ -314,17 +324,22 @@ def combined_1f1b_schedule_for_interleaved_pipelining(
         )
     # backward prepare
     b_model_chunk_id = None
+    # BEGIN MEGALENS OBSERVABILITY
     b_microbatch_id = None
+    # END MEGALENS OBSERVABILITY
     b_input_tensor = None
     b_output_tensor = None
     b_output_tensor_grad = None
     if b_virtual_microbatch_id is not None:
+        # BEGIN MEGALENS OBSERVABILITY
         b_microbatch_id = get_microbatch_id_in_model_chunk(b_virtual_microbatch_id, forward=False)
+        # END MEGALENS OBSERVABILITY
         b_model_chunk_id = get_model_chunk_id(b_virtual_microbatch_id, forward=False)
         b_input_tensor, b_output_tensor, b_output_tensor_grad = backward_step_helper_preprocess(
             b_virtual_microbatch_id, b_model_chunk_id
         )
     # Call combined forward and backward step to overlap the communication and computation
+    # BEGIN MEGALENS OBSERVABILITY
     output_tensor, num_tokens, input_tensor_grad = combined_forward_backward_step(
         forward_step_func,
         data_iterator[f_model_chunk_id] if f_model_chunk_id is not None else None,
@@ -353,6 +368,7 @@ def combined_1f1b_schedule_for_interleaved_pipelining(
         backward_microbatch=b_microbatch_id,
         b_model_chunk_id=b_model_chunk_id,
     )
+    # END MEGALENS OBSERVABILITY
     # forward post process
     if f_model_chunk_id is not None:
         forward_step_helper_postprocess(f_model_chunk_id, output_tensor, num_tokens)
@@ -606,6 +622,7 @@ def _combined_forward_backward_step_impl(
     return output_tensor, num_tokens, input_tensor_grad
 
 
+# BEGIN MEGALENS OBSERVABILITY
 @scoped_forward("combined-forward-backward-step", ctx_factory=_combined_step_context)
 def combined_forward_backward_step(
     forward_step_func,
@@ -659,3 +676,4 @@ def combined_forward_backward_step(
         encoder_decoder_xattn=encoder_decoder_xattn,
         fsdp_wrapper=fsdp_wrapper,
     )
+# END MEGALENS OBSERVABILITY

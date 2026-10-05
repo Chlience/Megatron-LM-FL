@@ -2,13 +2,20 @@
 
 import torch
 
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.observability import open_trace_scope, prepare_trace_scope
+
+# END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.parallel_state import get_global_memory_buffer
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.utils import (
     get_process_group_peer_ranks,
     get_tensor_model_parallel_group_if_none,
     is_torch_min_version,
 )
+
+# END MEGALENS OBSERVABILITY  # isort: split
 
 from .utils import split_tensor_along_last_dim
 
@@ -30,6 +37,7 @@ cur_platform = get_platform()
 ######## FlagScale End ########
 
 
+# BEGIN MEGALENS OBSERVABILITY
 def _tp_allreduce_context(input_, group_size: int) -> dict[str, object]:
     """Build TP all-reduce metadata only after the probe gate accepts it."""
     return {
@@ -69,12 +77,14 @@ def _tp_reduce_scatter_context(
     if split_sizes is not None:
         ctx["split_sizes"] = split_sizes
     return ctx
+# END MEGALENS OBSERVABILITY
 
 
 def _reduce(input_, group):
     """All-reduce the input tensor across model parallel group."""
     assert group is not None, "group should not be None"
 
+    # BEGIN MEGALENS OBSERVABILITY
     group_size = int(group.size())
     gate = prepare_trace_scope("tp-allreduce")
     ctx = _tp_allreduce_context(input_, group_size) if gate is not None else None
@@ -86,6 +96,7 @@ def _reduce(input_, group):
         if scope.get("op") == "all_reduce":
             scope.set("group", get_process_group_peer_ranks(group))
         torch.distributed.all_reduce(input_.contiguous(), group=group)
+    # END MEGALENS OBSERVABILITY
 
     return input_
 
@@ -148,12 +159,14 @@ def _gather_along_last_dim(input_, group):
     output = torch.empty(
         dim_size, dtype=input_.dtype, device=cur_platform.current_device()
     )  # FlagScale Add
+    # BEGIN MEGALENS OBSERVABILITY
     gate = prepare_trace_scope("tp-all-gather-last")
     ctx = _tp_all_gather_context(input_, world_size, "last") if gate is not None else None
     with open_trace_scope(gate, "tp-all-gather-last", ctx=ctx, slots=("group",)) as scope:
         dist_all_gather_func(output, input_.contiguous(), group=group)
         if gate is not None:
             scope.set("group", get_process_group_peer_ranks(group))
+    # END MEGALENS OBSERVABILITY
     tensor_list = output.chunk(world_size, dim=0)
     output = torch.cat(tensor_list, dim=-1).contiguous()
 
@@ -171,6 +184,7 @@ def _reduce_scatter_along_last_dim(input_, group):
         input_, split_size_or_sections=input_.shape[-1] // world_size, dim=1
     )
     concat_tensor = torch.cat(split_tensors, dim=0)
+    # BEGIN MEGALENS OBSERVABILITY
     gate = prepare_trace_scope("tp-reduce-scatter-last")
     ctx = (
         _tp_reduce_scatter_context(concat_tensor, world_size, "last") if gate is not None else None
@@ -179,6 +193,7 @@ def _reduce_scatter_along_last_dim(input_, group):
         output = _reduce_scatter_along_first_dim(concat_tensor, group=group).reshape(target_shape)
         if gate is not None:
             scope.set("group", get_process_group_peer_ranks(group))
+    # END MEGALENS OBSERVABILITY
     return output
 
 
@@ -222,6 +237,7 @@ def _gather_along_first_dim(input_, group, output_split_sizes=None, use_global_b
             )  # FlagScale Add
         output_tensor_list = list(torch.split(output, output_split_sizes, dim=0))
 
+    # BEGIN MEGALENS OBSERVABILITY
     gate = prepare_trace_scope("tp-all-gather-first")
     ctx = (
         _tp_all_gather_context(input_, world_size, "first", output_split_sizes)
@@ -235,6 +251,7 @@ def _gather_along_first_dim(input_, group, output_split_sizes=None, use_global_b
             torch.distributed.all_gather(output_tensor_list, input_, group=group)
         if gate is not None:
             scope.set("group", get_process_group_peer_ranks(group))
+    # END MEGALENS OBSERVABILITY
 
     return output
 
@@ -279,6 +296,7 @@ def _reduce_scatter_along_first_dim(input_, group, input_split_sizes=None, use_g
         else:
             output = torch.empty_like(input_tensor_list[rank])
 
+    # BEGIN MEGALENS OBSERVABILITY
     gate = prepare_trace_scope("tp-reduce-scatter")
     ctx = (
         _tp_reduce_scatter_context(input_, world_size, "first", input_split_sizes)
@@ -292,6 +310,7 @@ def _reduce_scatter_along_first_dim(input_, group, input_split_sizes=None, use_g
             torch.distributed.reduce_scatter(output, input_tensor_list, group=group)
         if gate is not None:
             scope.set("group", get_process_group_peer_ranks(group))
+    # END MEGALENS OBSERVABILITY
     return output
 
 
