@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import inspect
+import subprocess
+import sys
+import textwrap
 from typing import Any
 
 import pytest
@@ -16,6 +19,53 @@ from megatron.core.observability import (
     trace_is_enabled,
     trace_scope,
 )
+
+
+@pytest.mark.parametrize(
+    "first_import",
+    ["megatron.core", *(f"megatron.megalens.probes.{name}" for name in ("tp", "moe", "p2p", "dp"))],
+)
+def test_probe_import_order_preserves_facades_and_lazy_runtime(first_import: str) -> None:
+    script = textwrap.dedent(
+        """
+        import importlib
+        import importlib.abc
+        import sys
+
+        allowed = {
+            'megatron.megalens', 'megatron.megalens.probes',
+            *(f'megatron.megalens.probes.{name}' for name in ('tp', 'moe', 'p2p', 'dp')),
+        }
+
+        class RejectHeavyMegaLens(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname.startswith('megatron.megalens') and fullname not in allowed:
+                    raise AssertionError(f'Core imported heavy MegaLens module: {fullname}')
+
+        sys.meta_path.insert(0, RejectHeavyMegaLens())
+        importlib.import_module(sys.argv[1])
+        for legacy, probe in (
+            ('megatron.core.tensor_parallel.observability', 'tp'),
+            ('megatron.core.transformer.moe.observability', 'moe'),
+        ):
+            facade = importlib.import_module(legacy)
+            implementation = importlib.import_module(f'megatron.megalens.probes.{probe}')
+            assert facade.__all__ == implementation.__all__
+            for name in facade.__all__:
+                assert getattr(facade, name) is getattr(implementation, name), name
+        core_p2p = importlib.import_module('megatron.core.pipeline_parallel.p2p_communication')
+        p2p_probe = importlib.import_module('megatron.megalens.probes.p2p')
+        assert core_p2p.wait_p2p_request is p2p_probe.wait_p2p_request
+        assert set(name for name in sys.modules if name.startswith('megatron.megalens')) <= allowed
+    """
+    )
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", script, first_import],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 class _FakeScope:

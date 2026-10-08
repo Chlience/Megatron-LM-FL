@@ -1951,7 +1951,7 @@ def test_moe_probe_markers_and_public_signatures_remain_stable() -> None:
     ]
     assert list(inspect.signature(MoELayer.combine).parameters) == ["self", "output"]
 
-    helper_source = (ROOT / "megatron/core/transformer/moe/observability.py").read_text()
+    helper_source = (ROOT / "megatron/megalens/probes/moe.py").read_text()
     for forbidden in (
         "megatron.training",
         "megatron.megalens",

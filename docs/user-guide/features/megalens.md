@@ -428,6 +428,30 @@ python -m megatron.megalens.analyzer --help
 
 ## Reviewing MegaLens instrumentation
 
+The training probes use implicit gating: the runtime decides whether a scope is active from
+the Trace switch, capture window, granularity, and Graph suppression. Existing training commands
+and Trace files keep the same interface. A scope automatically closes on return or exception:
+
+```python
+from megatron.core.observability import trace_scope
+
+with trace_scope("existing-event-name"):
+    original_training_operation()
+```
+
+Use the reviewed event vocabulary when adding an integration. Dedicated probe helpers build
+observation fields only when the gate accepts the event. These scopes preserve the existing Trace
+timing backend and add no per-scope device synchronization.
+
+Dedicated PP, DP, TP, and MoE metadata and lifecycle helpers live in `megatron/megalens/probes/`.
+Training files call those helpers at the existing launch, scope, and wait boundaries. The generic
+sink/gate/scope interface remains in `megatron/core/observability.py`; the existing TP and MoE
+observability modules re-export their public helpers. Native process-group selection, collectives,
+and training state transitions remain at their original integration points. Core imports may load
+the lightweight probes package; they do not load the Trace runtime, analyzers, or optional
+collection dependencies. Imports through both the existing Core entries and the probes package
+are supported.
+
 Paired `# BEGIN MEGALENS OBSERVABILITY` and `# END MEGALENS OBSERVABILITY` comments
 identify MegaLens imports, metadata, scope wrappers, and lifecycle hooks in Core, training,
 the shared DualPipeV P2P wait integration, and the FlagScale training overlay. Dedicated Core

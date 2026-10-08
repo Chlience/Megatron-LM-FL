@@ -15,6 +15,7 @@ from megatron.core import utils as core_utils
 from megatron.core.observability import install_trace_sink, reset_trace_sink
 from megatron.core.tensor_parallel import layers
 from megatron.core.tensor_parallel import observability as tp_observability
+from megatron.megalens.probes import tp as tp_probes
 from megatron.megalens.trace import BASE_TRACING_EVENTS, FULL_TRACING_EVENTS
 
 
@@ -156,7 +157,7 @@ def _run_sequence_parallel_forward(
         assert actual_group is group
         return [7]
 
-    monkeypatch.setattr(tp_observability, "get_process_group_peer_ranks", peer_ranks)
+    monkeypatch.setattr(tp_probes, "get_process_group_peer_ranks", peer_ranks)
     ctx = _ForwardContext()
     result = layers.LinearWithGradAccumulationAndAsyncCommunication.forward(
         ctx, input_tensor, weight, None, False, False, True, None, 0, group, "vendor"
@@ -381,8 +382,8 @@ def test_async_trace_off_reuses_noop_scope_and_skips_metadata(monkeypatch) -> No
         del args, kwargs
         raise AssertionError("trace-off path built async metadata")
 
-    monkeypatch.setattr(tp_observability, "_best_effort_tensor_bytes", unexpected_metadata)
-    monkeypatch.setattr(tp_observability, "_best_effort_group_size", unexpected_metadata)
+    monkeypatch.setattr(tp_probes, "_best_effort_tensor_bytes", unexpected_metadata)
+    monkeypatch.setattr(tp_probes, "_best_effort_group_size", unexpected_metadata)
     kwargs = {
         "collective_op": "all-reduce",
         "dim": None,
@@ -725,7 +726,7 @@ def test_deferred_wgrad_first_all_gather_uses_the_same_sync_leaf(monkeypatch) ->
     global_buffer = _FakeGlobalMemoryBuffer(order)
     monkeypatch.setattr(parallel_state, "get_global_memory_buffer", lambda: global_buffer)
     monkeypatch.setattr(
-        tp_observability,
+        tp_probes,
         "get_process_group_peer_ranks",
         lambda actual_group: [9] if actual_group is tp_group else None,
     )

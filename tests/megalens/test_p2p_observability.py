@@ -11,6 +11,7 @@ import torch
 
 from megatron.core.observability import install_trace_sink, reset_trace_sink
 from megatron.core.pipeline_parallel import p2p_communication
+from megatron.megalens.probes import p2p as p2p_probes
 
 
 class _FakeGroup:
@@ -484,7 +485,7 @@ def test_batched_coalesced_wait_preserves_exception_identity() -> None:
     install_trace_sink(sink)
     wait_error = RuntimeError("aggregate wait failed")
     aggregate_request = _FakeRequest("coalesced-batch", error=wait_error)
-    operations = p2p_communication._build_p2p_operations(
+    operations = p2p_probes._build_p2p_operations(
         tensor_send_prev=None,
         tensor_recv_prev=torch.empty(2),
         tensor_send_next=torch.ones(2),
@@ -497,7 +498,7 @@ def test_batched_coalesced_wait_preserves_exception_identity() -> None:
     )
 
     with pytest.raises(RuntimeError) as raised:
-        p2p_communication._wait_p2p_batch_request(aggregate_request, operations)
+        p2p_probes._wait_p2p_batch_request(aggregate_request, operations)
 
     assert raised.value is wait_error
     assert aggregate_request.wait_calls == 1
@@ -527,7 +528,7 @@ def test_batched_coalesced_trace_off_skips_observation_metadata(monkeypatch) -> 
         p2p_communication.torch.distributed, "batch_isend_irecv", lambda ops: [aggregate_request]
     )
     monkeypatch.setattr(
-        p2p_communication,
+        p2p_probes,
         "_build_p2p_operations",
         lambda **kwargs: pytest.fail("trace-off path built P2P observation metadata"),
     )
@@ -562,7 +563,7 @@ def test_batched_non_positional_trace_off_waits_every_work_and_syncs(monkeypatch
         p2p_communication.cur_platform, "synchronize", lambda: synchronize_calls.append(True)
     )
     monkeypatch.setattr(
-        p2p_communication,
+        p2p_probes,
         "_build_p2p_operations",
         lambda **kwargs: pytest.fail("trace-off path built P2P observation metadata"),
     )
@@ -604,7 +605,7 @@ def test_batched_non_positional_trace_off_preserves_wait_exception_identity(monk
         lambda: pytest.fail("failed wait reached batch device synchronize"),
     )
     monkeypatch.setattr(
-        p2p_communication,
+        p2p_probes,
         "_build_p2p_operations",
         lambda **kwargs: pytest.fail("trace-off path built P2P observation metadata"),
     )
@@ -750,7 +751,7 @@ def test_batch_device_sync_only_gate_builds_metadata_at_sync_boundary(monkeypatc
     )
     monkeypatch.setattr(p2p_communication.cur_platform, "synchronize", fake_synchronize)
     monkeypatch.setattr(
-        p2p_communication,
+        p2p_probes,
         "_p2p_launch_context",
         lambda *args, **kwargs: pytest.fail("sync-only gate built launch metadata"),
     )
@@ -786,7 +787,7 @@ def test_batch_device_sync_trace_off_skips_metadata_and_preserves_calls(monkeypa
     )
     monkeypatch.setattr(p2p_communication.cur_platform, "synchronize", fake_synchronize)
     monkeypatch.setattr(
-        p2p_communication,
+        p2p_probes,
         "_build_p2p_operations",
         lambda **kwargs: pytest.fail("trace-off sync path built observation metadata"),
     )
@@ -1033,7 +1034,7 @@ def test_launch_only_gate_skips_directional_wait_metadata(monkeypatch) -> None:
         p2p_communication.torch.distributed, "isend", lambda *, tensor, dst, group: request
     )
     monkeypatch.setattr(
-        p2p_communication,
+        p2p_probes,
         "_p2p_wait_context",
         lambda *args, **kwargs: pytest.fail("disabled wait event built completion metadata"),
     )
@@ -1048,7 +1049,7 @@ def test_launch_only_gate_skips_directional_wait_metadata(monkeypatch) -> None:
 def test_ring_exchange_records_inline_launch_without_work_wait(monkeypatch) -> None:
     sink = _RecordingSink()
     install_trace_sink(sink)
-    assert getattr(p2p_communication._launch_p2p, "__megatron_trace_event__", None) == (
+    assert getattr(p2p_probes._launch_p2p, "__megatron_trace_event__", None) == (
         "p2p-launch"
     )
     communicator = _make_communicator(monkeypatch, use_ring_exchange_p2p=True)
@@ -1212,7 +1213,7 @@ def test_ring_exchange_trace_off_skips_metadata_and_calls_transport_once(monkeyp
         p2p_communication.torch.distributed, "ring_exchange", fake_ring_exchange, raising=False
     )
     monkeypatch.setattr(
-        p2p_communication,
+        p2p_probes,
         "_build_p2p_operations",
         lambda **kwargs: pytest.fail("trace-off ring path built observation metadata"),
     )
@@ -1246,7 +1247,7 @@ def test_ring_exchange_ignores_directional_wait_only_gate(monkeypatch) -> None:
         p2p_communication.torch.distributed, "ring_exchange", fake_ring_exchange, raising=False
     )
     monkeypatch.setattr(
-        p2p_communication,
+        p2p_probes,
         "_build_p2p_operations",
         lambda **kwargs: pytest.fail("ring path built metadata for a Work-only event"),
     )
@@ -1378,7 +1379,7 @@ def test_trace_off_keeps_async_request_behavior_and_does_not_import_megalens(mon
         p2p_communication.torch.distributed, "isend", lambda *, tensor, dst, group: send_request
     )
     monkeypatch.setattr(
-        p2p_communication,
+        p2p_probes,
         "_build_p2p_operations",
         lambda **kwargs: pytest.fail("trace-off path built P2P observation metadata"),
     )

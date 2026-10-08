@@ -9,6 +9,7 @@ import torch
 from megatron.core.distributed import param_and_grad_buffer
 from megatron.core.distributed.param_and_grad_buffer import _ParamAndGradBucketGroup
 from megatron.core.observability import install_trace_sink, reset_trace_sink
+from megatron.megalens.probes import dp as dp_probes
 
 
 class _RecordingScope:
@@ -233,12 +234,12 @@ def test_dp_param_allgather_null_sink_skips_metadata_and_preserves_sync_call(mon
     collective_calls = []
 
     monkeypatch.setattr(
-        param_and_grad_buffer,
+        dp_probes,
         "_dp_param_allgather_context",
         lambda **kwargs: pytest.fail("trace-off path built parameter all-gather context"),
     )
     monkeypatch.setattr(
-        param_and_grad_buffer,
+        dp_probes,
         "_dp_param_allgather_data_bytes",
         lambda *args, **kwargs: pytest.fail("trace-off path counted parameter bytes"),
     )
@@ -499,7 +500,7 @@ def test_dp_reduce_scatter_null_sink_skips_metadata_and_preserves_collectives(mo
     collective_calls = []
 
     monkeypatch.setattr(
-        param_and_grad_buffer,
+        dp_probes,
         "_dp_reduce_scatter_context",
         lambda **kwargs: pytest.fail("trace-off path built DP reduce-scatter context"),
     )
@@ -645,7 +646,7 @@ def test_dp_grad_sync_completion_null_sink_preserves_wait_without_metadata(monke
     waits = []
     bucket_group.grad_reduce_handle = SimpleNamespace(wait=lambda: waits.append("wait"))
     monkeypatch.setattr(
-        param_and_grad_buffer,
+        dp_probes,
         "_dp_grad_sync_completion_context",
         lambda **kwargs: pytest.fail("trace-off path built gradient completion context"),
     )
@@ -841,7 +842,7 @@ def test_dp_allreduce_null_sink_skips_metadata_queries_and_preserves_sync_call(m
     collective_calls = []
     probe_metadata_calls = []
     monkeypatch.setattr(
-        param_and_grad_buffer,
+        dp_probes,
         "_dp_allreduce_context",
         lambda **kwargs: pytest.fail("trace-off path built DP all-reduce context"),
     )
@@ -1017,7 +1018,7 @@ def test_dp_multi_instance_null_sink_skips_inter_metadata(monkeypatch):
     collective_groups = []
 
     monkeypatch.setattr(
-        param_and_grad_buffer,
+        dp_probes,
         "_dp_inter_instance_allreduce_context",
         lambda **kwargs: pytest.fail("trace-off path built inter-instance all-reduce context"),
     )

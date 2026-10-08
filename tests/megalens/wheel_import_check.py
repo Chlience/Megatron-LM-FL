@@ -20,6 +20,17 @@ CORE_MODULES = (
     "megatron.core.transformer.moe.router",
 )
 
+LIGHTWEIGHT_PROBE_MODULES = frozenset(
+    {
+        "megatron.megalens",
+        "megatron.megalens.probes",
+        "megatron.megalens.probes.dp",
+        "megatron.megalens.probes.moe",
+        "megatron.megalens.probes.p2p",
+        "megatron.megalens.probes.tp",
+    }
+)
+
 MEGALENS_MODULES = (
     # Trace aggregation and the Probe runtime bridge.
     "megatron.megalens.trace",
@@ -52,6 +63,11 @@ REQUIRED_WHEEL_FILES = frozenset(
         "megatron/core/transformer/moe/observability.py",
         "megatron/plugin/dualpipev/dualpipev_schedules.py",
         "megatron/megalens/__init__.py",
+        "megatron/megalens/probes/__init__.py",
+        "megatron/megalens/probes/dp.py",
+        "megatron/megalens/probes/moe.py",
+        "megatron/megalens/probes/p2p.py",
+        "megatron/megalens/probes/tp.py",
         "megatron/megalens/analyzer.py",
         "megatron/megalens/core_adapter.py",
         "megatron/megalens/data_loader.py",
@@ -89,7 +105,7 @@ def _loaded_megalens_modules() -> list[str]:
     return sorted(name for name in sys.modules if name.startswith("megatron.megalens"))
 
 
-def _import_core_without_megalens():
+def _import_core_with_lightweight_probes():
     initially_loaded = _loaded_megalens_modules()
     if initially_loaded:
         raise AssertionError(
@@ -98,8 +114,9 @@ def _import_core_without_megalens():
 
     imported_core = [importlib.import_module(name) for name in CORE_MODULES]
     loaded_by_core = _loaded_megalens_modules()
-    if loaded_by_core:
-        raise AssertionError(f"Core imports loaded MegaLens modules: {loaded_by_core}")
+    unexpected = sorted(set(loaded_by_core) - LIGHTWEIGHT_PROBE_MODULES)
+    if unexpected:
+        raise AssertionError(f"Core imports loaded non-probe MegaLens modules: {unexpected}")
     return imported_core
 
 
@@ -151,14 +168,14 @@ def main() -> int:
     if args.require_source_root_absent and source_root.exists():
         raise AssertionError(f"source root is present during wheel check: {source_root}")
 
-    imported_core = _import_core_without_megalens()
+    imported_core = _import_core_with_lightweight_probes()
     imported_megalens = [importlib.import_module(name) for name in MEGALENS_MODULES]
 
     distribution = importlib.metadata.distribution("megatron-core")
     _assert_wheel_files(distribution)
     _assert_expected_version(distribution, imported_core[0], args.expected_version)
 
-    print("Core imports did not load MegaLens")
+    print("Core imports loaded only lightweight MegaLens probes")
     print(f"installed MegaLens origin: {imported_megalens[0].__file__}")
     print("wheel Trace, Probe, analysis imports and file manifest: PASS")
     return 0
