@@ -1049,9 +1049,7 @@ def test_launch_only_gate_skips_directional_wait_metadata(monkeypatch) -> None:
 def test_ring_exchange_records_inline_launch_without_work_wait(monkeypatch) -> None:
     sink = _RecordingSink()
     install_trace_sink(sink)
-    assert getattr(p2p_probes._launch_p2p, "__megatron_trace_event__", None) == (
-        "p2p-launch"
-    )
+    assert getattr(p2p_probes._launch_p2p, "__megatron_trace_event__", None) == ("p2p-launch")
     communicator = _make_communicator(monkeypatch, use_ring_exchange_p2p=True)
     output = torch.arange(6, dtype=torch.float16)
     real_empty = torch.empty
@@ -1106,16 +1104,11 @@ def test_ring_exchange_records_inline_launch_without_work_wait(monkeypatch) -> N
     assert sink.records[0]["values"] == {"completed": True}
 
 
-def test_ring_exchange_preserves_configured_device_sync_and_transport_metadata(
-    monkeypatch,
-) -> None:
+def test_ring_exchange_preserves_configured_device_sync_and_transport_metadata(monkeypatch) -> None:
     sink = _RecordingSink()
     install_trace_sink(sink)
     communicator = _make_communicator(
-        monkeypatch,
-        use_ring_exchange_p2p=True,
-        batch_p2p_comm=True,
-        batch_p2p_sync=True,
+        monkeypatch, use_ring_exchange_p2p=True, batch_p2p_comm=True, batch_p2p_sync=True
     )
     output = torch.arange(6, dtype=torch.float16)
     real_empty = torch.empty
@@ -1133,25 +1126,17 @@ def test_ring_exchange_preserves_configured_device_sync_and_transport_metadata(
 
     monkeypatch.setattr(p2p_communication.torch, "empty", cpu_empty)
     monkeypatch.setattr(
-        p2p_communication.torch.distributed,
-        "ring_exchange",
-        fake_ring_exchange,
-        raising=False,
+        p2p_communication.torch.distributed, "ring_exchange", fake_ring_exchange, raising=False
     )
     monkeypatch.setattr(p2p_communication.cur_platform, "synchronize", fake_synchronize)
 
     output_grad = communicator.send_forward_recv_backward(
-        output,
-        tensor_shapes=(6,),
-        is_last_stage=False,
+        output, tensor_shapes=(6,), is_last_stage=False
     )
 
     assert tuple(output_grad.shape) == (6,)
     assert [name for name, _ in call_order] == ["ring", "sync"]
-    assert [record["name"] for record in sink.records] == [
-        "p2p-launch",
-        "p2p-batch-device-sync",
-    ]
+    assert [record["name"] for record in sink.records] == ["p2p-launch", "p2p-batch-device-sync"]
     launch, device_sync = (record["ctx"] for record in sink.records)
     assert device_sync["transport_api"] == "ring_exchange"
     assert device_sync["request_pairing"] == "none"
@@ -1260,18 +1245,20 @@ def test_ring_exchange_ignores_directional_wait_only_gate(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("group_rank", [0, 1])
+@pytest.mark.parametrize("group_size", [2, 3])
 @pytest.mark.parametrize(
     ("pipeline_backend", "world_backend", "uses_world"),
     [("gloo", "nccl", True), ("gloo", None, True), ("ucc", "nccl", False)],
 )
-def test_size2_unbatched_records_backend_of_actual_request_group(
-    monkeypatch, group_rank, pipeline_backend, world_backend, uses_world
+def test_unbatched_records_backend_of_actual_request_group(
+    monkeypatch, group_rank, group_size, pipeline_backend, world_backend, uses_world
 ) -> None:
     sink = _RecordingSink()
     install_trace_sink(sink)
     communicator = _make_communicator(
-        monkeypatch, group_size=2, group_rank=group_rank, backend=pipeline_backend
+        monkeypatch, group_size=group_size, group_rank=group_rank, backend=pipeline_backend
     )
+    uses_world = uses_world and group_size == 2
     world_group = p2p_communication.torch.distributed.group.WORLD
     real_empty = torch.empty
     calls = []
@@ -1367,8 +1354,25 @@ def test_size2_unbatched_records_backend_of_actual_request_group(
         assert operation["backend"] == expected_backend
 
 
-def test_trace_off_keeps_async_request_behavior_and_does_not_import_megalens(monkeypatch) -> None:
-    communicator = _make_communicator(monkeypatch)
+@pytest.mark.parametrize("group_rank", [0, 1])
+@pytest.mark.parametrize("group_size", [2, 3])
+def test_trace_off_keeps_async_request_behavior_and_does_not_import_megalens(
+    monkeypatch, group_rank, group_size
+) -> None:
+    communicator = _make_communicator(monkeypatch, group_size=group_size, group_rank=group_rank)
+    group_queries = []
+    backend_queries = []
+    monkeypatch.setattr(
+        communicator.pp_group, "size", lambda: group_queries.append("size") or group_size
+    )
+    monkeypatch.setattr(
+        communicator.pp_group, "rank", lambda: group_queries.append("rank") or group_rank
+    )
+    monkeypatch.setattr(
+        p2p_communication.torch.distributed,
+        "get_backend",
+        lambda group: backend_queries.append(group) or "nccl",
+    )
     send_request = _FakeRequest("send-next", result="done")
     output = torch.arange(3, dtype=torch.float32)
     megalens_modules_before = {
@@ -1391,6 +1395,8 @@ def test_trace_off_keeps_async_request_behavior_and_does_not_import_megalens(mon
     assert list(requests) == ["send_next"]
     assert requests["send_next"] is send_request
     assert requests["send_next"].name == "send-next"
+    assert group_queries == ["size", "rank"]
+    assert backend_queries == ([communicator.pp_group] if group_size == 2 else [])
     assert communicator._p2p_work_observations == {}
     communicator._p2p_work_observation_lock = _FailOnEnterLock()
     assert (

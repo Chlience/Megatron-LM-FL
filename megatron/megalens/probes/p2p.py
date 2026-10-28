@@ -628,12 +628,12 @@ class _P2PBatch:
         self,
         transport_api: str,
         wait_on_reqs: bool,
-        group_plan: list[tuple[str, Any]] | None,
+        group_resolver: Callable[[Any], tuple[Any, Any]] | None,
         call_kwargs: dict[str, Any],
     ) -> None:
         self.transport_api = transport_api
         self.wait_on_reqs = wait_on_reqs
-        self.group_plan = group_plan
+        self.group_resolver = group_resolver
         self.call_kwargs = call_kwargs
         has_operations = any(
             call_kwargs[key] is not None
@@ -667,15 +667,16 @@ class _P2PBatch:
             'send_next': values['tensor_send_next'],
             'recv_next': values['tensor_recv_next'],
         }
-        backends_by_key = (
-            {
-                key: _get_distributed_backend(group)
-                for key, group in self.group_plan
-                if active_tensors[key] is not None
+        backends_by_key = None
+        if self.transport_api == 'isend_irecv' and self.group_resolver is not None:
+            send_group, recv_group = self.group_resolver(values['group'])
+            if values['group'].rank() % 2:
+                send_group, recv_group = recv_group, send_group
+            backends_by_key = {
+                key: _get_distributed_backend(send_group if key.startswith('send') else recv_group)
+                for key, tensor in active_tensors.items()
+                if tensor is not None
             }
-            if self.group_plan is not None
-            else None
-        )
         self._operations_cache = _build_p2p_operations(
             tensor_send_prev=values['tensor_send_prev'],
             tensor_recv_prev=values['tensor_recv_prev'],
@@ -738,9 +739,9 @@ def launch_p2p(
     *,
     transport_api: str,
     wait_on_reqs: bool,
-    group_plan: list[tuple[str, Any]] | None = None,
+    group_resolver: Callable[[Any], tuple[Any, Any]] | None = None,
     **call_kwargs: Any,
 ) -> tuple[Any, _P2PBatch]:
     """Invoke the existing launch and return its raw Works plus call-local observation."""
-    observation = _P2PBatch(transport_api, wait_on_reqs, group_plan, call_kwargs)
+    observation = _P2PBatch(transport_api, wait_on_reqs, group_resolver, call_kwargs)
     return observation.launch(function), observation
