@@ -26,6 +26,9 @@ PROBE_METHODS = {
     "trace_scope",
     "open_trace_scope",
     "_pipeline_phase_scope",
+    "all_reduce_scope",
+    "all_gather_scope",
+    "reduce_scatter_scope",
 }
 PROBE_NAME_POSITIONS = {"open_trace_scope": 1}
 PROBE_DECORATORS = {"scoped_forward"}

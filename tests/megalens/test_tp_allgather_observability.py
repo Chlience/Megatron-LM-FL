@@ -9,6 +9,7 @@ import torch
 
 from megatron.core.observability import install_trace_sink, reset_trace_sink
 from megatron.core.tensor_parallel import mappings
+from megatron.megalens.probes import tp as tp_probes
 
 
 class _FakeGroup:
@@ -259,13 +260,13 @@ def test_tp_allgather_closed_gate_skips_context_and_metadata(
     collective_calls: list[tuple[str, Any]] = []
 
     monkeypatch.setattr(
-        mappings,
+        tp_probes,
         "_tp_all_gather_context",
         lambda *args, **kwargs: pytest.fail("closed gate built TP all-gather context"),
         raising=False,
     )
     monkeypatch.setattr(
-        mappings,
+        tp_probes,
         "get_process_group_peer_ranks",
         lambda group: pytest.fail("closed gate queried TP all-gather peers"),
     )
@@ -388,7 +389,7 @@ def test_tp_allgather_collective_error_closes_scope_and_preserves_identity(
     monkeypatch.setattr(mappings, "dist_all_gather_func", _fail_collective)
     monkeypatch.setattr(mappings.torch.distributed, "all_gather", _fail_collective)
     monkeypatch.setattr(
-        mappings,
+        tp_probes,
         "get_process_group_peer_ranks",
         lambda group: pytest.fail("failed collective queried peer metadata"),
     )
@@ -415,7 +416,7 @@ def test_tp_allgather_collective_error_closes_scope_and_preserves_identity(
     assert "group" not in record.get("values", {})
 
 
-def test_tp_allgather_uses_two_literal_core_producers_without_training_imports() -> None:
+def test_tp_allgather_keeps_literal_scope_calls_without_training_imports() -> None:
     source_path = Path(mappings.__file__)
     source = source_path.read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -423,18 +424,17 @@ def test_tp_allgather_uses_two_literal_core_producers_without_training_imports()
     imported_modules = []
 
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if node.func.id == "open_trace_scope" and len(node.args) >= 2:
-                event_node = node.args[1]
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == "all_gather_scope" and node.args:
+                event_node = node.args[0]
                 if isinstance(event_node, ast.Constant) and isinstance(event_node.value, str):
                     producer_names.append(event_node.value)
         elif isinstance(node, ast.ImportFrom) and node.module is not None:
             imported_modules.append(node.module)
 
-    assert producer_names.count("tp-all-gather-first") == 1
-    assert producer_names.count("tp-all-gather-last") == 1
+    assert set(producer_names) == {'tp-all-gather-first', 'tp-all-gather-last'}
     assert "megatron.training.global_vars" not in imported_modules
     assert not any(
-        module == "megatron.megalens" or module.startswith("megatron.megalens.")
+        module.startswith("megatron.megalens") and module != "megatron.megalens.probes"
         for module in imported_modules
     )

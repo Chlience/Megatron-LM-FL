@@ -7,6 +7,7 @@ import torch
 
 from megatron.core.observability import install_trace_sink, reset_trace_sink
 from megatron.core.tensor_parallel import mappings
+from megatron.megalens.probes import tp as tp_probes
 
 
 class _FakeGroup:
@@ -113,7 +114,7 @@ def test_tp_allreduce_null_sink_preserves_collective_and_return_semantics(monkey
     metadata_calls: list[str] = []
 
     monkeypatch.setattr(
-        mappings,
+        tp_probes,
         "_tp_allreduce_context",
         lambda input_, group_size: pytest.fail("trace-off path built TP all-reduce context"),
     )
@@ -160,7 +161,7 @@ def test_tp_allreduce_single_rank_emits_source_noop_scope(monkeypatch) -> None:
         lambda *args, **kwargs: pytest.fail("single-rank fast path called all_reduce"),
     )
     monkeypatch.setattr(
-        mappings,
+        tp_probes,
         "get_process_group_peer_ranks",
         lambda group: pytest.fail("single-rank fast path queried peer metadata"),
     )

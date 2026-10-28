@@ -25,6 +25,47 @@ _ASYNC_COMPLETE_EVENT = "tp-linear-async-complete"
 _ASYNC_OPERATION_SEQUENCE = count(1)
 
 
+def _tp_allreduce_context(input_, group_size: int) -> dict[str, object]:
+    """Build TP all-reduce metadata only after the probe gate accepts it."""
+    return {
+        "data_bytes": int(input_.numel() * input_.element_size()),
+        "group_size": group_size,
+        "op": "all_reduce",
+        "timing_phase": "collective_call",
+        "payload_role": "inplace_input_output",
+    }
+
+
+def _tp_all_gather_context(
+    input_, group_size: int, dim: str, split_sizes=None
+) -> dict[str, object]:
+    """Build the source-compatible TP all-gather metadata after its gate accepts."""
+    ctx = {
+        "data_bytes": int(input_.numel() * input_.element_size()),
+        "group_size": group_size,
+        "op": "all-gather",
+        "dim": dim,
+    }
+    if split_sizes is not None:
+        ctx["split_sizes"] = split_sizes
+    return ctx
+
+
+def _tp_reduce_scatter_context(
+    input_, group_size: int, dim: str, split_sizes=None
+) -> dict[str, object]:
+    """Build source-compatible TP reduce-scatter metadata after its gate accepts."""
+    ctx = {
+        "data_bytes": int(input_.numel() * input_.element_size()),
+        "group_size": group_size,
+        "op": "reduce-scatter",
+        "dim": dim,
+    }
+    if split_sizes is not None:
+        ctx["split_sizes"] = split_sizes
+    return ctx
+
+
 @dataclass(frozen=True, slots=True)
 class _AsyncLinearOperation:
     """Scalar-only identity for one direct TP Linear asynchronous request."""
@@ -237,6 +278,57 @@ def sync_linear_all_gather_scope(input_tensor, group) -> ContextManager[None]:
         "dim": "first",
     }
     return _active_sync_linear_all_gather_scope(gate, trace_context, group)
+
+
+@contextmanager
+def _active_mapping_scope(
+    gate: TraceGate,
+    name: str,
+    context: dict[str, object],
+    group: Any,
+    *,
+    group_before: bool = False,
+) -> Iterator[None]:
+    with open_trace_scope(gate, name, ctx=context, slots=("group",)) as scope:
+        if group_before and scope.get("op") == "all_reduce":
+            scope.set("group", get_process_group_peer_ranks(group))
+        yield
+        if name != "tp-allreduce":
+            scope.set("group", get_process_group_peer_ranks(group))
+
+
+def all_reduce_scope(name: str, input_: Any, group: Any, group_size: int) -> ContextManager[None]:
+    """Observe the native all-reduce, including its source single-rank no-op."""
+    gate = prepare_trace_scope(name)
+    if gate is None:
+        return _NOOP_SCOPE
+    return _active_mapping_scope(
+        gate, name, _tp_allreduce_context(input_, group_size), group, group_before=group_size > 1
+    )
+
+
+def all_gather_scope(
+    name: str, input_: Any, group: Any, group_size: int, dim: str, split_sizes: Any = None
+) -> ContextManager[None]:
+    """Observe one native mapping all-gather with lazy metadata and peer slots."""
+    gate = prepare_trace_scope(name)
+    if gate is None:
+        return _NOOP_SCOPE
+    return _active_mapping_scope(
+        gate, name, _tp_all_gather_context(input_, group_size, dim, split_sizes), group
+    )
+
+
+def reduce_scatter_scope(
+    name: str, input_: Any, group: Any, group_size: int, dim: str, split_sizes: Any = None
+) -> ContextManager[None]:
+    """Observe one native mapping reduce-scatter without changing its branches."""
+    gate = prepare_trace_scope(name)
+    if gate is None:
+        return _NOOP_SCOPE
+    return _active_mapping_scope(
+        gate, name, _tp_reduce_scatter_context(input_, group_size, dim, split_sizes), group
+    )
 
 
 __all__ = [

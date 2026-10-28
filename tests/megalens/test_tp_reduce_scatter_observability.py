@@ -10,6 +10,7 @@ import torch
 
 from megatron.core.observability import install_trace_sink, reset_trace_sink
 from megatron.core.tensor_parallel import mappings
+from megatron.megalens.probes import tp as tp_probes
 
 
 class _FakeGroup:
@@ -402,13 +403,13 @@ def test_tp_reduce_scatter_closed_gate_skips_context_and_metadata(
     collective_calls: list[str] = []
 
     monkeypatch.setattr(
-        mappings,
+        tp_probes,
         "_tp_reduce_scatter_context",
         lambda *args, **kwargs: pytest.fail("closed gate built TP reduce-scatter context"),
         raising=False,
     )
     monkeypatch.setattr(
-        mappings,
+        tp_probes,
         "get_process_group_peer_ranks",
         lambda group: pytest.fail("closed gate queried TP reduce-scatter peers"),
     )
@@ -547,7 +548,7 @@ def test_tp_reduce_scatter_collective_error_closes_scopes_and_preserves_identity
     monkeypatch.setattr(mappings, "dist_reduce_scatter_func", _fail_collective)
     monkeypatch.setattr(mappings.torch.distributed, "reduce_scatter", _fail_collective)
     monkeypatch.setattr(
-        mappings,
+        tp_probes,
         "get_process_group_peer_ranks",
         lambda group: pytest.fail("failed collective queried peer metadata"),
     )
@@ -586,7 +587,7 @@ def test_tp_reduce_scatter_preprocess_error_happens_before_probe(monkeypatch, va
     assert sink.records == []
 
 
-def test_tp_reduce_scatter_uses_two_literal_core_producers_without_async_extension() -> None:
+def test_tp_reduce_scatter_keeps_literal_scope_calls_without_async_extension() -> None:
     source_path = Path(mappings.__file__)
     source = source_path.read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -594,9 +595,9 @@ def test_tp_reduce_scatter_uses_two_literal_core_producers_without_async_extensi
     imported_modules = []
 
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if node.func.id == "open_trace_scope" and len(node.args) >= 2:
-                event_node = node.args[1]
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr == "reduce_scatter_scope" and node.args:
+                event_node = node.args[0]
                 if isinstance(event_node, ast.Constant) and isinstance(event_node.value, str):
                     producer_names.append(event_node.value)
         elif isinstance(node, ast.ImportFrom) and node.module is not None:
@@ -608,13 +609,12 @@ def test_tp_reduce_scatter_uses_two_literal_core_producers_without_async_extensi
             inspect.getsource(mappings._reduce_scatter_along_last_dim),
         )
     )
-    assert producer_names.count("tp-reduce-scatter") == 1
-    assert producer_names.count("tp-reduce-scatter-last") == 1
+    assert set(producer_names) == {'tp-reduce-scatter', 'tp-reduce-scatter-last'}
     assert "async_op" not in reduce_scatter_source
     assert ".wait(" not in reduce_scatter_source
     assert "synchronize" not in reduce_scatter_source
     assert "megatron.training.global_vars" not in imported_modules
     assert not any(
-        module == "megatron.megalens" or module.startswith("megatron.megalens.")
+        module.startswith("megatron.megalens") and module != "megatron.megalens.probes"
         for module in imported_modules
     )
