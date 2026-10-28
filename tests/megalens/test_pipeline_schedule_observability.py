@@ -10,6 +10,7 @@ import torch
 from megatron.core.observability import install_trace_sink, reset_trace_sink
 from megatron.core.pipeline_parallel import combined_1f1b, schedules
 from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.megalens.probes import pipeline as pipeline_probes
 
 
 class _RecordingScope:
@@ -663,10 +664,7 @@ def test_interleaved_forward_only_identifies_each_virtual_stage_without_backward
     ]
     assert [_event_fields(record)["is_last_stage"] for record in forward_records] == [False, True]
     assert [
-        (
-            _event_fields(record)["num_tokens"],
-            _event_fields(record)["sum_sq_seq_len"],
-        )
+        (_event_fields(record)["num_tokens"], _event_fields(record)["sum_sq_seq_len"])
         for record in forward_records
     ] == [(1, 1.0), (1, 1.0)]
     assert all(record["name"] != "backward-step" for record in sink.records)
@@ -789,12 +787,12 @@ def test_null_sink_preserves_phase_results_without_building_trace_context(monkey
     microbatch = _ObservedMicrobatch(2)
     _ObservedMicrobatch.format_calls = 0
     monkeypatch.setattr(
-        schedules,
+        pipeline_probes,
         "_pipeline_phase_context",
         lambda **kwargs: pytest.fail("trace-off path built pipeline phase context"),
     )
     monkeypatch.setattr(
-        schedules,
+        pipeline_probes,
         "_pipeline_grad_sync_context",
         lambda schedule: pytest.fail("trace-off path built grad-sync context"),
     )

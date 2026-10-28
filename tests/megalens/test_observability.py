@@ -23,7 +23,13 @@ from megatron.core.observability import (
 
 @pytest.mark.parametrize(
     "first_import",
-    ["megatron.core", *(f"megatron.megalens.probes.{name}" for name in ("tp", "moe", "p2p", "dp"))],
+    [
+        "megatron.core",
+        *(
+            f"megatron.megalens.probes.{name}"
+            for name in ("tp", "moe", "p2p", "dp", "pipeline", "training")
+        ),
+    ],
 )
 def test_probe_import_order_preserves_facades_and_lazy_runtime(first_import: str) -> None:
     script = textwrap.dedent(
@@ -34,7 +40,7 @@ def test_probe_import_order_preserves_facades_and_lazy_runtime(first_import: str
 
         allowed = {
             'megatron.megalens', 'megatron.megalens.probes',
-            *(f'megatron.megalens.probes.{name}' for name in ('tp', 'moe', 'p2p', 'dp')),
+            *(f'megatron.megalens.probes.{name}' for name in ('tp', 'moe', 'p2p', 'dp', 'pipeline', 'training')),
         }
 
         class RejectHeavyMegaLens(importlib.abc.MetaPathFinder):
@@ -56,6 +62,8 @@ def test_probe_import_order_preserves_facades_and_lazy_runtime(first_import: str
         core_p2p = importlib.import_module('megatron.core.pipeline_parallel.p2p_communication')
         p2p_probe = importlib.import_module('megatron.megalens.probes.p2p')
         assert core_p2p.wait_p2p_request is p2p_probe.wait_p2p_request
+        importlib.import_module('megatron.core.pipeline_parallel.schedules')
+        importlib.import_module('megatron.training.training')
         assert set(name for name in sys.modules if name.startswith('megatron.megalens')) <= allowed
     """
     )

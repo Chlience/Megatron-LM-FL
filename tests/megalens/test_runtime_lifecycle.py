@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import warnings
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -13,6 +14,7 @@ from typing import Any
 import pytest
 
 from megatron.core.observability import reset_trace_sink, scoped_forward
+from megatron.megalens.probes import training as training_probes
 from megatron.megalens.runtime import MegaLensRuntime
 from megatron.megalens.trace import Tracer, _trace_filename
 
@@ -135,9 +137,7 @@ def test_training_iteration_scope_matches_the_source_envelope() -> None:
     training_path = Path(__file__).resolve().parents[2] / "megatron/training/training.py"
     module = ast.parse(training_path.read_text(encoding="utf-8"))
     train = next(
-        node
-        for node in module.body
-        if isinstance(node, ast.FunctionDef) and node.name == "train"
+        node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "train"
     )
     scopes = [
         node
@@ -236,9 +236,7 @@ def test_controlled_training_exit_flushes_megalens_before_system_exit() -> None:
     training_path = Path(__file__).resolve().parents[2] / "megatron/training/training.py"
     module = ast.parse(training_path.read_text(encoding="utf-8"))
     train = next(
-        node
-        for node in module.body
-        if isinstance(node, ast.FunctionDef) and node.name == "train"
+        node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "train"
     )
     controlled_exit = next(
         node
@@ -262,12 +260,10 @@ def test_arbitrary_system_exit_remains_non_graceful(monkeypatch) -> None:
 
     shutdowns: list[bool] = []
     monkeypatch.setattr(
-        training_module,
-        "shutdown_megalens_runtime",
-        lambda *, graceful: shutdowns.append(graceful),
+        training_module, "shutdown_megalens_runtime", lambda *, graceful: shutdowns.append(graceful)
     )
 
-    @training_module._owns_megalens_runtime
+    @training_probes.owns_runtime(training_module.shutdown_megalens_runtime)
     def exit_outside_the_controlled_training_branch() -> None:
         raise SystemExit(23)
 
@@ -283,12 +279,10 @@ def test_successful_pretrain_lifecycle_shuts_down_gracefully(monkeypatch) -> Non
     shutdowns: list[bool] = []
     result = object()
     monkeypatch.setattr(
-        training_module,
-        "shutdown_megalens_runtime",
-        lambda *, graceful: shutdowns.append(graceful),
+        training_module, "shutdown_megalens_runtime", lambda *, graceful: shutdowns.append(graceful)
     )
 
-    @training_module._owns_megalens_runtime
+    @training_probes.owns_runtime(training_module.shutdown_megalens_runtime)
     def finish_pretrain():
         return result
 
@@ -309,7 +303,7 @@ def test_pretrain_failure_wins_over_teardown_failure(monkeypatch, caplog) -> Non
     monkeypatch.setattr(training_module, "shutdown_megalens_runtime", fail_shutdown)
     caplog.set_level("ERROR", logger=training_module.__name__)
 
-    @training_module._owns_megalens_runtime
+    @training_probes.owns_runtime(training_module.shutdown_megalens_runtime)
     def fail_pretrain():
         raise pretrain_failure
 
@@ -326,103 +320,57 @@ def test_pretrain_failure_wins_over_teardown_failure(monkeypatch, caplog) -> Non
     assert diagnostics[0].exc_info[1] is teardown_failure
 
 
-def test_training_iteration_admission_restores_the_source_mode1_barrier() -> None:
-    training_path = Path(__file__).resolve().parents[2] / "megatron/training/training.py"
-    module = ast.parse(training_path.read_text(encoding="utf-8"))
-    train = next(
-        node
-        for node in module.body
-        if isinstance(node, ast.FunctionDef) and node.name == "train"
-    )
-    loop = next(
-        node
-        for node in ast.walk(train)
-        if isinstance(node, ast.While)
-        and any(
-            isinstance(statement, ast.Assign)
-            and ast.unparse(statement.targets[0]) == "skip_iteration"
-            for statement in node.body
-        )
-    )
-    assignments = {
-        ast.unparse(statement.targets[0]): statement
-        for statement in loop.body
-        if isinstance(statement, ast.Assign)
-    }
-    assert ast.unparse(assignments["skip_iteration"].value) == (
-        "iteration + 1 in args.iterations_to_skip"
-    )
-    assert ast.unparse(assignments["trace_iteration"].value) == (
-        "getattr(args, 'trace', False) and (not skip_iteration)"
+@pytest.mark.parametrize("trace", [False, True])
+@pytest.mark.parametrize("skip_iteration", [False, True])
+@pytest.mark.parametrize("mode0", [False, True])
+def test_training_iteration_admission_restores_the_source_mode1_barrier(
+    monkeypatch, trace, skip_iteration, mode0
+) -> None:
+    calls = []
+    runtime_lookups = []
+
+    @contextmanager
+    def iteration(iteration_id, *, enable_hw_monitor):
+        calls.append(("begin", iteration_id, enable_hw_monitor))
+        try:
+            yield
+        finally:
+            calls.append("end")
+
+    runtime = SimpleNamespace(
+        tracer=SimpleNamespace(
+            is_mode0=lambda: mode0, close_trace_window=lambda: calls.append("close-window")
+        ),
+        iteration=iteration,
     )
 
-    close_branch = next(
-        statement
-        for statement in loop.body
-        if isinstance(statement, ast.If)
-        and ast.unparse(statement.test)
-        == "skip_iteration and getattr(args, 'trace', False)"
-    )
-    assert [ast.unparse(statement) for statement in close_branch.body] == [
-        "get_megalens_runtime().tracer.close_trace_window()"
-    ]
+    def get_runtime():
+        runtime_lookups.append(True)
+        return runtime
 
-    trace_branch = next(
-        statement
-        for statement in loop.body
-        if isinstance(statement, ast.If)
-        and ast.unparse(statement.test) == "trace_iteration"
+    monkeypatch.setattr(
+        training_probes.torch.distributed, "barrier", lambda: calls.append("barrier")
     )
-    mode_branch = next(
-        statement
-        for statement in trace_branch.body
-        if isinstance(statement, ast.If)
-    )
-    assert ast.unparse(mode_branch.test) == "not megalens_runtime.tracer.is_mode0()"
-    barriers = [
-        node
-        for node in ast.walk(mode_branch)
-        if isinstance(node, ast.Call) and ast.unparse(node) == "torch.distributed.barrier()"
-    ]
-    assert len(barriers) == 1
-    barrier = barriers[0]
-    assert barrier.args == []
-    assert barrier.keywords == []
-    assert "is_tracing_active" not in ast.unparse(trace_branch)
+    with training_probes.iteration_scope(
+        _args(trace=trace, hardware_monitor=True), 5, get_runtime, skip_iteration=skip_iteration
+    ):
+        calls.append("body")
 
-    runtime_assignment = next(
-        statement
-        for statement in trace_branch.body
-        if isinstance(statement, ast.Assign)
-        and ast.unparse(statement.targets[0]) == "megalens_iteration"
-    )
-    assert ast.unparse(runtime_assignment.value) == (
-        "megalens_runtime.iteration(iteration + 1, "
-        "enable_hw_monitor=getattr(args, 'hardware_monitor', False))"
-    )
-    assert [ast.unparse(statement) for statement in trace_branch.orelse] == [
-        "megalens_iteration = nullcontext()"
-    ]
-
-    scope = next(
-        node
-        for node in loop.body
-        if isinstance(node, ast.With)
-        and isinstance(node.items[0].context_expr, ast.Name)
-        and node.items[0].context_expr.id == "megalens_iteration"
-    )
-    assert barrier.lineno < scope.lineno
-    assert close_branch.lineno < trace_branch.lineno
+    if not trace:
+        assert runtime_lookups == []
+        assert calls == ["body"]
+    elif skip_iteration:
+        assert runtime_lookups == [True]
+        assert calls == ["close-window", "body"]
+    else:
+        assert runtime_lookups == [True]
+        assert calls == ([] if mode0 else ["barrier"]) + [("begin", 6, True), "body", "end"]
 
 
 def test_skipped_iteration_closes_a_retained_continuous_window() -> None:
     tracer = Tracer()
     tracer.configure(
-        _args(
-            trace_interval=2,
-            continuous_trace_iterations=2,
-            trace_cupti_kernels="on",
-        )
+        _args(trace_interval=2, continuous_trace_iterations=2, trace_cupti_kernels="on")
     )
     calls: list[str] = []
     tracer.iter = 1
@@ -431,9 +379,7 @@ def test_skipped_iteration_closes_a_retained_continuous_window() -> None:
 
     def stop() -> None:
         calls.append("stop")
-        tracer._records.append(
-            {"record_type": "cuda_kernel", "iteration": 1, "name": "kernel-1"}
-        )
+        tracer._records.append({"record_type": "cuda_kernel", "iteration": 1, "name": "kernel-1"})
 
     flushed: list[dict[str, Any]] = []
 
@@ -528,10 +474,7 @@ def test_tracer_abort_discards_only_incomplete_iteration_records() -> None:
 
     tracer.abort_iteration()
 
-    assert tracer._records == [
-        {"iteration": 1},
-        {"iteration": 1, "record_type": "cuda_kernel"},
-    ]
+    assert tracer._records == [{"iteration": 1}, {"iteration": 1, "record_type": "cuda_kernel"}]
     tracer.shutdown(graceful=False)
 
 
@@ -560,11 +503,7 @@ def test_continuous_kernel_window_attributes_both_iterations(monkeypatch) -> Non
     from megatron.megalens import trace as trace_module
     from megatron.training.arguments import _validate_megalens_args
 
-    args = _args(
-        trace_interval=2,
-        continuous_trace_iterations=2,
-        trace_cupti_kernels="on",
-    )
+    args = _args(trace_interval=2, continuous_trace_iterations=2, trace_cupti_kernels="on")
     _validate_megalens_args(args)
 
     tracer = Tracer()
@@ -589,9 +528,7 @@ def test_continuous_kernel_window_attributes_both_iterations(monkeypatch) -> Non
 
     def add_cuda_event(*_args, **_kwargs) -> None:
         assert tracer._pendings is not None
-        tracer._pendings.append(
-            SimpleNamespace(event=SimpleNamespace(synchronize=lambda: None))
-        )
+        tracer._pendings.append(SimpleNamespace(event=SimpleNamespace(synchronize=lambda: None)))
 
     def process_pending(*_args) -> int:
         tracer._records.append({"iteration": tracer.iter, "rel_ts": 1})
@@ -708,9 +645,7 @@ def test_training_argument_validation_matches_runtime_contract() -> None:
     with pytest.raises(ValueError, match="continuous-trace-iterations"):
         _validate_megalens_args(_args(trace_interval=2, continuous_trace_iterations=3))
     with pytest.warns(RuntimeWarning, match="graph-external"):
-        _validate_megalens_args(
-            _args(cuda_graph_impl="local", trace_cupti_kernels="on")
-        )
+        _validate_megalens_args(_args(cuda_graph_impl="local", trace_cupti_kernels="on"))
     with pytest.raises(ValueError, match="hardware-monitor requires --trace"):
         _validate_megalens_args(_args(trace=False, hardware_monitor=True))
 
@@ -756,24 +691,16 @@ def test_cuda_graph_kernel_capture_is_allowed_in_mode1() -> None:
 def test_flushed_trace_window_reopens_kernel_profiler() -> None:
     tracer = Tracer()
     tracer.configure(
-        _args(
-            trace_interval=1,
-            continuous_trace_iterations=1,
-            trace_cupti_kernels="on",
-        )
+        _args(trace_interval=1, continuous_trace_iterations=1, trace_cupti_kernels="on")
     )
     calls: list[str] = []
     tracer.iter = 1
-    tracer._pendings = [
-        SimpleNamespace(event=SimpleNamespace(synchronize=lambda: None))
-    ]
+    tracer._pendings = [SimpleNamespace(event=SimpleNamespace(synchronize=lambda: None))]
     tracer._pending_pad_before = 0
     tracer._add_cuda_event = lambda *args, **kwargs: None
     tracer._cache_ranks = lambda: None
     tracer._calibrate = lambda: 1
-    tracer._process_pending_scope = lambda *args: tracer._records.append(
-        {"rel_ts": 1}
-    )
+    tracer._process_pending_scope = lambda *args: tracer._records.append({"rel_ts": 1})
     tracer._stop_kernel_profiler_and_extract = lambda: calls.append("stop")
     tracer.log = lambda: calls.append("log")
 
@@ -916,9 +843,7 @@ def test_rank_cache_survives_missing_cuda_device_query(monkeypatch) -> None:
     tracer.shutdown(graceful=False)
 
 
-def test_trace_log_uses_cached_fallback_without_model_parallel(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_trace_log_uses_cached_fallback_without_model_parallel(tmp_path: Path, monkeypatch) -> None:
     from megatron.megalens import trace as trace_module
 
     def _missing_parallel_state() -> int:
@@ -928,14 +853,10 @@ def test_trace_log_uses_cached_fallback_without_model_parallel(
         trace_module.parallel_state, "get_data_parallel_rank", _missing_parallel_state
     )
     monkeypatch.setattr(
-        trace_module.parallel_state,
-        "get_pipeline_model_parallel_rank",
-        _missing_parallel_state,
+        trace_module.parallel_state, "get_pipeline_model_parallel_rank", _missing_parallel_state
     )
     monkeypatch.setattr(
-        trace_module.parallel_state,
-        "get_tensor_model_parallel_rank",
-        _missing_parallel_state,
+        trace_module.parallel_state, "get_tensor_model_parallel_rank", _missing_parallel_state
     )
     monkeypatch.setattr(trace_module.torch.distributed, "get_rank", lambda: 3)
 

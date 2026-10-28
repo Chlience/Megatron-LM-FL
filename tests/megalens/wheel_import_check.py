@@ -27,7 +27,9 @@ LIGHTWEIGHT_PROBE_MODULES = frozenset(
         "megatron.megalens.probes.dp",
         "megatron.megalens.probes.moe",
         "megatron.megalens.probes.p2p",
+        "megatron.megalens.probes.pipeline",
         "megatron.megalens.probes.tp",
+        "megatron.megalens.probes.training",
     }
 )
 
@@ -67,7 +69,9 @@ REQUIRED_WHEEL_FILES = frozenset(
         "megatron/megalens/probes/dp.py",
         "megatron/megalens/probes/moe.py",
         "megatron/megalens/probes/p2p.py",
+        "megatron/megalens/probes/pipeline.py",
         "megatron/megalens/probes/tp.py",
+        "megatron/megalens/probes/training.py",
         "megatron/megalens/analyzer.py",
         "megatron/megalens/core_adapter.py",
         "megatron/megalens/data_loader.py",
@@ -142,9 +146,7 @@ def _assert_wheel_files(distribution: importlib.metadata.Distribution) -> None:
 
 
 def _assert_expected_version(
-    distribution: importlib.metadata.Distribution,
-    imported_core,
-    expected_version: str | None,
+    distribution: importlib.metadata.Distribution, imported_core, expected_version: str | None
 ) -> None:
     if expected_version is None:
         return

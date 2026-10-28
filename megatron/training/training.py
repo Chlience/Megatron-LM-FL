@@ -160,6 +160,7 @@ from megatron.core.distributed.fsdp.mcore_fsdp_adapter import (
 
 # BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.observability import trace_scope
+from megatron.megalens.probes import training as training_probes
 
 # END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.optimizer import get_mup_config_overrides, get_standard_config_overrides
@@ -1043,28 +1044,7 @@ def preprocess_common_state_dict(common_state_dict):
 
 
 # BEGIN MEGALENS OBSERVABILITY
-def _owns_megalens_runtime(pretrain_func):
-    """Ensure failures across the pretrain lifecycle close MegaLens."""
-
-    @functools.wraps(pretrain_func)
-    def wrapped(*args, **kwargs):
-        try:
-            result = pretrain_func(*args, **kwargs)
-        except BaseException:
-            try:
-                shutdown_megalens_runtime(graceful=False)
-            except BaseException:
-                logging.getLogger(__name__).exception(
-                    "MegaLens non-graceful shutdown failed while handling a pretrain failure"
-                )
-            raise
-        shutdown_megalens_runtime(graceful=True)
-        return result
-
-    return wrapped
-
-
-@_owns_megalens_runtime
+@training_probes.owns_runtime(shutdown_megalens_runtime)
 # END MEGALENS OBSERVABILITY
 def pretrain(
     cfg_container: PretrainConfigContainer,
@@ -3463,20 +3443,9 @@ def train(
     while iteration < args.train_iters:
         # BEGIN MEGALENS OBSERVABILITY
         skip_iteration = (iteration + 1) in args.iterations_to_skip
-        if skip_iteration and getattr(args, 'trace', False):
-            get_megalens_runtime().tracer.close_trace_window()
-        trace_iteration = getattr(args, 'trace', False) and not skip_iteration
-        if trace_iteration:
-            megalens_runtime = get_megalens_runtime()
-            if not megalens_runtime.tracer.is_mode0():
-                # Align mode-1 iteration starts across the default WORLD process group.
-                torch.distributed.barrier()
-            megalens_iteration = megalens_runtime.iteration(
-                iteration + 1,
-                enable_hw_monitor=getattr(args, 'hardware_monitor', False),
-            )
-        else:
-            megalens_iteration = nullcontext()
+        megalens_iteration = training_probes.iteration_scope(
+            args, iteration, get_megalens_runtime, skip_iteration=skip_iteration
+        )
         with megalens_iteration:
             if (args.profile
                 and (len(args.profile_ranks) == 0 or

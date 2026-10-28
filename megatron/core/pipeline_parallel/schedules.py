@@ -10,7 +10,14 @@ from torch.autograd.variable import Variable
 from megatron.core import parallel_state
 
 # BEGIN MEGALENS OBSERVABILITY  # isort: split
-from megatron.core.observability import open_trace_scope, prepare_trace_scope, trace_is_enabled
+from megatron.core.observability import trace_is_enabled
+from megatron.megalens.probes.pipeline import (
+    _pipeline_grad_sync_scope,
+    _pipeline_phase_scope,
+    _pipeline_workload_from_output,
+    _set_pipeline_operation_identity,
+    _set_pipeline_workload,
+)
 
 # END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.pipeline_parallel.fine_grained_activation_offload import (
@@ -58,102 +65,6 @@ from .hybrid_cp_schedule import hybrid_context_parallel_forward_backward
 
 # Types
 Shape = Union[List[int], torch.Size]
-
-
-# BEGIN MEGALENS OBSERVABILITY
-def _set_pipeline_operation_identity(scope, current_microbatch, vp_stage):
-    """Fill operation identity only when the phase scope is active."""
-    if scope.get("timing_phase") != "framework_phase":
-        return
-    if current_microbatch is None:
-        operation_id = None
-    else:
-        vp_identity = "none" if vp_stage is None else vp_stage
-        operation_id = f"pp:microbatch={current_microbatch}:vp={vp_identity}"
-    scope.set("operation_id", operation_id)
-
-
-def _pipeline_workload_from_output(
-    output_tensor, config, *, cp_group_size, tp_group_size, fallback_num_tokens
-):
-    """Derive the source MixedPara workload from the pre-loss output shape."""
-    current_num_tokens = 0
-    actual_tensor = output_tensor[0] if isinstance(output_tensor, list) else output_tensor
-    if isinstance(actual_tensor, torch.Tensor) and actual_tensor.ndim >= 2:
-        current_num_tokens = int(actual_tensor.shape[0]) * int(actual_tensor.shape[1])
-        current_num_tokens *= cp_group_size
-        if getattr(config, "sequence_parallel", False):
-            current_num_tokens *= tp_group_size
-
-    if current_num_tokens == 0:
-        current_num_tokens = fallback_num_tokens
-
-    return int(current_num_tokens), float(current_num_tokens**2)
-
-
-def _set_pipeline_workload(scope, workload):
-    """Fill workload slots only when the phase scope is active."""
-    if workload is None or scope.get("timing_phase") != "framework_phase":
-        return
-    num_tokens, sum_sq_seq_len = workload
-    scope.set("num_tokens", num_tokens)
-    scope.set("sum_sq_seq_len", sum_sq_seq_len)
-
-
-def _optional_bool(value):
-    """Preserve unknown schedule metadata instead of asserting a false value."""
-    return None if value is None else bool(value)
-
-
-def _pipeline_phase_context(
-    *,
-    current_microbatch,
-    vp_stage,
-    is_first_microbatch,
-    is_last_stage,
-):
-    """Build phase metadata after the facade confirms that tracing is active."""
-    ctx = {
-        "current_microbatch": current_microbatch,
-        "vp_stage": vp_stage,
-        "is_first_microbatch": _optional_bool(is_first_microbatch),
-        "is_last_stage": _optional_bool(is_last_stage),
-        "timing_phase": "framework_phase",
-    }
-    return ctx
-
-
-def _pipeline_phase_scope(
-    name,
-    *,
-    current_microbatch,
-    vp_stage,
-    is_first_microbatch,
-    is_last_stage,
-    slots,
-):
-    gate = prepare_trace_scope(name)
-    ctx = None
-    if gate is not None:
-        ctx = _pipeline_phase_context(
-            current_microbatch=current_microbatch,
-            vp_stage=vp_stage,
-            is_first_microbatch=is_first_microbatch,
-            is_last_stage=is_last_stage,
-        )
-    return open_trace_scope(gate, name, ctx=ctx, slots=slots)
-
-
-def _pipeline_grad_sync_context(schedule):
-    """Build schedule metadata only for an enabled grad-sync probe."""
-    return {"schedule": schedule, "timing_phase": "framework_phase"}
-
-
-def _pipeline_grad_sync_scope(schedule):
-    gate = prepare_trace_scope("grad-sync")
-    ctx = _pipeline_grad_sync_context(schedule) if gate is not None else None
-    return open_trace_scope(gate, "grad-sync", ctx=ctx)
-# END MEGALENS OBSERVABILITY
 
 
 def get_forward_backward_func(pp_size: Optional[int] = None, vp_size: Optional[int] = None):
@@ -899,7 +810,9 @@ def forward_backward_no_pipelining(
 
     forward_data_store = []
     input_tensor, output_tensor_grad = None, None
-    total_num_tokens = torch.zeros([], dtype=torch.int, device=cur_platform.device_name())  # FlagScale Modify
+    total_num_tokens = torch.zeros(
+        [], dtype=torch.int, device=cur_platform.device_name()
+    )  # FlagScale Modify
 
     if config.overlap_moe_expert_parallel_comm and not forward_only:
         forward_data_store, total_num_tokens = combined_1f1b_schedule_for_no_pipelining(
@@ -938,9 +851,7 @@ def forward_backward_no_pipelining(
         )
     else:
         # BEGIN MEGALENS OBSERVABILITY
-        backward_workloads = (
-            [] if not forward_only and trace_is_enabled("backward-step") else None
-        )
+        backward_workloads = [] if not forward_only and trace_is_enabled("backward-step") else None
         workload_tp_group_size = pg_collection.tp.size()
         # END MEGALENS OBSERVABILITY
         with no_sync_func():
@@ -976,9 +887,7 @@ def forward_backward_no_pipelining(
                         is_first_microbatch=i == 0,
                         is_last_stage=True,
                         pipeline_workload=(
-                            backward_workloads.pop(0)
-                            if backward_workloads is not None
-                            else None
+                            backward_workloads.pop(0) if backward_workloads is not None else None
                         ),
                     )
                     # END MEGALENS OBSERVABILITY
@@ -1339,16 +1248,14 @@ def forward_backward_pipelining_with_interleaving(
     record_pipeline_workload = forward_only or not config.overlap_moe_expert_parallel_comm
     backward_workloads = (
         [[] for _ in model]
-        if record_pipeline_workload
-        and not forward_only
-        and trace_is_enabled("backward-step")
+        if record_pipeline_workload and not forward_only and trace_is_enabled("backward-step")
         else None
     )
     workload_tp_group_size = tp_group.size() if record_pipeline_workload else 1
     # END MEGALENS OBSERVABILITY
     total_num_tokens = torch.zeros(
         [], dtype=torch.int, device=cur_platform.device_name()
-    )  # FlagScale Add
+    )  # FlagScale Modify
 
     forward_data_store = []
     output_tensor_grads = None
@@ -2619,7 +2526,7 @@ def forward_backward_pipelining_without_interleaving(
     # END MEGALENS OBSERVABILITY
     total_num_tokens = torch.zeros(
         [], dtype=torch.int, device=cur_platform.device_name()
-    )  # FlagScale Add
+    )  # FlagScale Modify
 
     if not forward_only:
         input_tensors = []
