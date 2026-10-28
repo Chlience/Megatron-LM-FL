@@ -17,6 +17,7 @@ from megatron.core.transformer.moe.token_dispatcher import (
     MoEFlexTokenDispatcher,
 )
 from megatron.megalens.core_adapter import MegaLensTraceSink
+from megatron.megalens.probes import moe as moe_probes
 from megatron.megalens.trace import Tracer
 
 
@@ -311,7 +312,7 @@ def test_closed_standard_alltoall_gates_skip_context_and_preserve_calls(
     tokens = torch.ones((2, 2))
     probs = torch.ones(2)
     monkeypatch.setattr(
-        token_dispatcher_module,
+        moe_probes,
         "ep_collective_trace_context",
         lambda *args, **kwargs: pytest.fail("closed EP gate constructed context"),
     )
@@ -567,7 +568,7 @@ def test_closed_allgather_gates_skip_context_and_preserve_collectives(
     probs = torch.ones((2, 2))
     calls: list[str] = []
     monkeypatch.setattr(
-        token_dispatcher_module,
+        moe_probes,
         "ep_collective_trace_context",
         lambda *args, **kwargs: pytest.fail("closed EP gate constructed context"),
     )
@@ -768,7 +769,7 @@ def test_closed_flex_deepep_gates_skip_context_and_preserve_manager_calls(
     owner, manager = _flex_owner(sink, operations)
     hidden_states = torch.ones((2, 3))
     monkeypatch.setattr(
-        token_dispatcher_module,
+        moe_probes,
         "ep_collective_trace_context",
         lambda *args, **kwargs: pytest.fail("closed Flex gate constructed context"),
     )
@@ -852,7 +853,7 @@ def test_closed_flex_hybridep_gates_skip_context_and_preserve_manager_calls(
     owner, manager = _flex_owner(sink, operations, backend="hybridep")
     hidden_states = torch.ones((2, 3))
     monkeypatch.setattr(
-        token_dispatcher_module,
+        moe_probes,
         "ep_collective_trace_context",
         lambda *args, **kwargs: pytest.fail("closed HybridEP gate constructed context"),
     )

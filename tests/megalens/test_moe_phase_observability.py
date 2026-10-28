@@ -32,6 +32,7 @@ from megatron.core.transformer.moe.observability import (
 )
 from megatron.core.transformer.moe.router import TopKRouter
 from megatron.megalens.core_adapter import MegaLensTraceSink
+from megatron.megalens.probes import moe as moe_probes
 from megatron.megalens.trace import Tracer
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1222,7 +1223,7 @@ def test_shared_expert_closed_gate_preserves_compute_and_skips_context(
     events: list[tuple[Any, ...]] = []
     layer, shared_experts, hidden_states = _shared_expert_fixture(sink, events)
     monkeypatch.setattr(
-        moe_layer_module,
+        moe_probes,
         "shared_experts_trace_context",
         lambda owner: pytest.fail("closed shared-expert gate constructed context"),
     )
@@ -1243,7 +1244,7 @@ def test_shared_expert_null_sink_preserves_compute_without_context(
     local_sink = _RecordingSink()
     layer, shared_experts, hidden_states = _shared_expert_fixture(local_sink, events)
     monkeypatch.setattr(
-        moe_layer_module,
+        moe_probes,
         "shared_experts_trace_context",
         lambda owner: pytest.fail("Null sink constructed shared-expert context"),
     )
@@ -1568,13 +1569,13 @@ def test_experts_emit_local_workload_around_only_the_expert_call(
     layer, dispatcher, experts = _layer_fixture(sink, events)
     hidden_states = torch.tensor([[1.0], [2.0]])
     probs = torch.tensor([0.25, 0.75])
-    original_expert_workload = moe_layer_module.expert_workload
+    original_expert_workload = moe_probes.expert_workload
 
     def checked_workload(tokens_per_expert: torch.Tensor):
         events.append(("expert-workload", tuple(sink.active)))
         return original_expert_workload(tokens_per_expert)
 
-    monkeypatch.setattr(moe_layer_module, "expert_workload", checked_workload)
+    monkeypatch.setattr(moe_probes, "expert_workload", checked_workload)
 
     output, bias = MoELayer.routed_experts_compute(layer, hidden_states, probs)
 
@@ -1705,7 +1706,7 @@ def test_closed_gate_skips_all_moe_metadata_and_workload(
         "expert_workload",
         "combine_trace_context",
     ):
-        monkeypatch.setattr(moe_layer_module, name, fail)
+        monkeypatch.setattr(moe_probes, name, fail)
 
     actual_probs, actual_map = TopKRouter.forward(router, input_tensor)
     dispatch_result = MoELayer.dispatch(layer, input_tensor, probs)

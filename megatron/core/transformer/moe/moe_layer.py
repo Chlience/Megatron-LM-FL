@@ -17,7 +17,8 @@ from megatron.core.extensions.transformer_engine import HAVE_TE
 from megatron.core.inference.utils import InferenceMode
 
 # BEGIN MEGALENS OBSERVABILITY  # isort: split
-from megatron.core.observability import open_trace_scope, prepare_trace_scope, trace_is_enabled
+from megatron.core.observability import trace_is_enabled
+from megatron.megalens.probes import moe as moe_probes
 
 # END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.process_groups_config import ProcessGroupCollection
@@ -31,16 +32,8 @@ from megatron.core.transformer.moe.moe_utils import (
 
 # BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.transformer.moe.observability import (
-    EXPERT_WORKLOAD_SLOTS,
     bind_dispatch_fields,
     capture_dispatch_fields,
-    combine_trace_context,
-    current_dispatch_fields,
-    dispatch_trace_context,
-    expert_workload,
-    experts_trace_context,
-    set_trace_fields,
-    shared_experts_trace_context,
 )
 
 # END MEGALENS OBSERVABILITY  # isort: split
@@ -565,13 +558,7 @@ class MoELayer(BaseMoELayer):
         if self.config.overlap_dispatch_backward_with_experts_wgrad:
             hidden_states = _RegisterDelayedWgradForExperts.apply(self, hidden_states)
         # BEGIN MEGALENS OBSERVABILITY
-        dispatch_gate = prepare_trace_scope("moe-dispatch")
-        dispatch_context = (
-            dispatch_trace_context(self, hidden_states, current_dispatch_fields())
-            if dispatch_gate is not None
-            else None
-        )
-        with open_trace_scope(dispatch_gate, "moe-dispatch", attrs=dispatch_context):
+        with moe_probes.dispatch_scope(self, hidden_states):
             return self.token_dispatcher.token_dispatch(hidden_states, probs)
         # END MEGALENS OBSERVABILITY
 
@@ -599,13 +586,7 @@ class MoELayer(BaseMoELayer):
         shared_expert_output = None
         if self.use_shared_expert and not self.shared_expert_overlap:
             # BEGIN MEGALENS OBSERVABILITY
-            shared_expert_gate = prepare_trace_scope("moe-shared-expert")
-            shared_expert_context = (
-                shared_experts_trace_context(self) if shared_expert_gate is not None else None
-            )
-            with open_trace_scope(
-                shared_expert_gate, "moe-shared-expert", attrs=shared_expert_context
-            ):
+            with moe_probes.shared_experts_scope(self):
                 # Compute the shared expert separately when not overlapped with communication.
                 if self.shared_experts_recompute:
                     if self.config.fp8 or self.config.fp4:
@@ -642,14 +623,7 @@ class MoELayer(BaseMoELayer):
             self.token_dispatcher.dispatch_postprocess(hidden_states, probs)
         )
         # BEGIN MEGALENS OBSERVABILITY
-        experts_gate = prepare_trace_scope("moe-experts")
-        experts_context = experts_trace_context(self) if experts_gate is not None else None
-        experts_workload = expert_workload(tokens_per_expert) if experts_gate is not None else None
-        with open_trace_scope(
-            experts_gate, "moe-experts", attrs=experts_context, slots=EXPERT_WORKLOAD_SLOTS
-        ) as experts_scope:
-            if experts_workload is not None:
-                set_trace_fields(experts_scope, experts_workload)
+        with moe_probes.experts_scope(self, tokens_per_expert):
             if hasattr(self, "_inference_token_dispatcher") and InferenceMode.is_active():
                 routing_map = self.token_dispatcher.routing_map
                 expert_output, mlp_bias = apply_module(self.experts)(
@@ -668,9 +642,7 @@ class MoELayer(BaseMoELayer):
     # BEGIN MEGALENS OBSERVABILITY
     def _combine_with_scope(self, output: torch.Tensor, *, include_postprocess: bool):
         """Use the full source boundary for sequential calls and a short split-call boundary."""
-        combine_gate = prepare_trace_scope("moe-combine")
-        combine_context = combine_trace_context(self, output) if combine_gate is not None else None
-        with open_trace_scope(combine_gate, "moe-combine", attrs=combine_context):
+        with moe_probes.combine_scope(self, output):
             output = self.token_dispatcher.token_combine(output)
             if include_postprocess:
                 output = self.token_dispatcher.combine_postprocess(output)

@@ -104,6 +104,8 @@ def test_current_target_matches_reviewed_fixture() -> None:
     [
         ("gradient_all_reduce_scope", "embedding-grads-allreduce"),
         ("gradient_all_reduce_scope", "sp-layernorm-allreduce"),
+        ("ep_collective_scope", "ep-allgather-dispatch"),
+        ("ep_collective_scope", "ep-alltoall-combine"),
     ],
 )
 def test_scanner_recognizes_probe_owned_collective_scopes(tmp_path, name, event) -> None:

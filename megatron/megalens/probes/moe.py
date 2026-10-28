@@ -7,11 +7,12 @@ from __future__ import annotations
 import math
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, ContextManager, Iterator, Mapping, Sequence
 
 import torch
 
 from megatron.core import utils
+from megatron.core.observability import TraceScope, open_trace_scope, prepare_trace_scope
 
 ROUTER_WORKLOAD_SLOTS = (
     "aux_loss",
@@ -314,6 +315,86 @@ def combine_trace_context(layer: Any, output: torch.Tensor) -> dict[str, Any]:
         {"dispatcher": layer.config.moe_token_dispatcher_type, "num_tokens": int(output.shape[0])}
     )
     return context
+
+
+def ep_collective_scope(
+    name: str,
+    dispatcher: Any,
+    tensor: torch.Tensor,
+    auxiliary_tensor: torch.Tensor | None = None,
+    *,
+    comm_type: str | None,
+    dispatcher_name: str,
+    group: Any,
+) -> TraceScope:
+    """Prepare EP metadata without moving communication or stream boundaries."""
+    gate = prepare_trace_scope(name)
+    attrs = None
+    if gate is not None:
+        tensors = (tensor,) if auxiliary_tensor is None else (tensor, auxiliary_tensor)
+        if comm_type is None:
+            comm_type = (
+                "ep-hybridep"
+                if dispatcher.config.moe_flex_dispatcher_backend == "hybridep"
+                else "ep-deepep"
+            )
+        attrs = ep_collective_trace_context(
+            dispatcher, tensors, comm_type=comm_type, dispatcher_name=dispatcher_name, group=group
+        )
+    return open_trace_scope(gate, name, attrs=attrs)
+
+
+def shared_expert_overlap_scope(owner: Any, stage: str) -> TraceScope:
+    """Open one shared-stream stage after its native stream context is entered."""
+    gate = prepare_trace_scope("moe-shared-expert")
+    attrs = None
+    if gate is not None:
+        layer, ep_size = owner._shared_expert_trace_identity
+        attrs = {"layer": layer, "ep_size": ep_size, "stage": stage}
+    return open_trace_scope(gate, "moe-shared-expert", attrs=attrs)
+
+
+def dispatch_scope(layer: Any, hidden_states: torch.Tensor) -> TraceScope:
+    """Prepare the dispatch scope with invocation-local router evidence."""
+    gate = prepare_trace_scope("moe-dispatch")
+    attrs = (
+        dispatch_trace_context(layer, hidden_states, current_dispatch_fields())
+        if gate is not None
+        else None
+    )
+    return open_trace_scope(gate, "moe-dispatch", attrs=attrs)
+
+
+def shared_experts_scope(layer: Any) -> TraceScope:
+    """Prepare the non-overlapped shared-expert scope."""
+    gate = prepare_trace_scope("moe-shared-expert")
+    attrs = shared_experts_trace_context(layer) if gate is not None else None
+    return open_trace_scope(gate, "moe-shared-expert", attrs=attrs)
+
+
+@contextmanager
+def _experts_scope(manager: TraceScope, workload: Mapping[str, Any]) -> Iterator[None]:
+    with manager as scope:
+        set_trace_fields(scope, workload)
+        yield
+
+
+def experts_scope(layer: Any, tokens_per_expert: torch.Tensor) -> ContextManager[Any]:
+    """Build workload before entering the same native expert-compute boundary."""
+    gate = prepare_trace_scope("moe-experts")
+    if gate is None:
+        return open_trace_scope(gate, "moe-experts")
+    attrs = experts_trace_context(layer)
+    workload = expert_workload(tokens_per_expert)
+    manager = open_trace_scope(gate, "moe-experts", attrs=attrs, slots=EXPERT_WORKLOAD_SLOTS)
+    return _experts_scope(manager, workload)
+
+
+def combine_scope(layer: Any, output: torch.Tensor) -> TraceScope:
+    """Prepare the scope used by sequential and split combine paths."""
+    gate = prepare_trace_scope("moe-combine")
+    attrs = combine_trace_context(layer, output) if gate is not None else None
+    return open_trace_scope(gate, "moe-combine", attrs=attrs)
 
 
 @torch.no_grad()

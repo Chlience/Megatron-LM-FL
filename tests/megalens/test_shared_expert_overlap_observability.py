@@ -151,7 +151,6 @@ class _UnpackFails:
 
 class _SharedExpertHarness:
     wait_current_stream = SharedExpertMLP.wait_current_stream
-    _overlap_trace_scope = SharedExpertMLP._overlap_trace_scope
     pre_forward_comm = SharedExpertMLP.pre_forward_comm
     linear_fc1_forward_and_act = SharedExpertMLP.linear_fc1_forward_and_act
     linear_fc2_forward = SharedExpertMLP.linear_fc2_forward
@@ -277,6 +276,29 @@ def test_overlap_closed_gate_skips_attrs_and_preserves_numerical_path(
         ("wait_stream", "shared", "main"),
         ("wait_stream", "main", "shared"),
     ]
+
+
+def test_overlap_prepares_gate_and_metadata_inside_shared_stream(overlap_runtime) -> None:
+    timeline, platform = overlap_runtime
+    sink = _RecordingSink(timeline, platform.current_stream)
+    prepared = []
+
+    def is_enabled(name):
+        assert platform.current_stream() is platform.shared
+        prepared.append(name)
+        return True
+
+    class Identity:
+        def __iter__(self):
+            assert platform.current_stream() is platform.shared
+            return iter((7, 4))
+
+    sink.is_enabled = is_enabled
+    install_trace_sink(sink)
+    _run_overlap_path(Identity(), timeline, platform)
+
+    assert prepared == ["moe-shared-expert"] * 5
+    assert platform.current_stream() is platform.main
 
 
 def test_overlap_stage_error_closes_scope_and_preserves_exception_identity(overlap_runtime) -> None:

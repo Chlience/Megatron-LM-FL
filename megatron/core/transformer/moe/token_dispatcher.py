@@ -14,7 +14,7 @@ from megatron.core.fusions.fused_pad_routing_map import fused_pad_routing_map
 from megatron.core.jit import jit_fuser
 
 # BEGIN MEGALENS OBSERVABILITY  # isort: split
-from megatron.core.observability import open_trace_scope, prepare_trace_scope
+from megatron.megalens.probes import moe as moe_probes
 
 # END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.tensor_parallel import (
@@ -40,11 +40,6 @@ from megatron.core.transformer.moe.moe_utils import (
     sort_chunks_by_idxs,
     unpermute,
 )
-
-# BEGIN MEGALENS OBSERVABILITY  # isort: split
-from megatron.core.transformer.moe.observability import ep_collective_trace_context
-
-# END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.transformer.moe.shared_experts import SharedExpertMLP
 from megatron.core.transformer.transformer_config import TransformerConfig
 
@@ -283,19 +278,14 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
         """Gathers tokens from all TP*EP ranks using AllGather."""
 
         # BEGIN MEGALENS OBSERVABILITY
-        dispatch_gate = prepare_trace_scope("ep-allgather-dispatch")
-        dispatch_context = (
-            ep_collective_trace_context(
-                self,
-                (hidden_states,),
-                comm_type="ep-allgather",
-                dispatcher_name="allgather",
-                group=self.tp_ep_group,
-            )
-            if dispatch_gate is not None
-            else None
-        )
-        with open_trace_scope(dispatch_gate, "ep-allgather-dispatch", attrs=dispatch_context):
+        with moe_probes.ep_collective_scope(
+            "ep-allgather-dispatch",
+            self,
+            hidden_states,
+            comm_type="ep-allgather",
+            dispatcher_name="allgather",
+            group=self.tp_ep_group,
+        ):
             # Permute the tokens across the expert parallel devices.
             if self.tp_size > 1 or self.ep_size > 1:
                 ## local_indices calculation
@@ -377,19 +367,14 @@ class MoEAllGatherTokenDispatcher(MoETokenDispatcher):
         communication pattern and prepares tokens for final unpermutation.
         """
         # BEGIN MEGALENS OBSERVABILITY
-        combine_gate = prepare_trace_scope("ep-allgather-combine")
-        combine_context = (
-            ep_collective_trace_context(
-                self,
-                (hidden_states,),
-                comm_type="ep-reduce-scatter",
-                dispatcher_name="allgather",
-                group=self.tp_ep_group,
-            )
-            if combine_gate is not None
-            else None
-        )
-        with open_trace_scope(combine_gate, "ep-allgather-combine", attrs=combine_context):
+        with moe_probes.ep_collective_scope(
+            "ep-allgather-combine",
+            self,
+            hidden_states,
+            comm_type="ep-reduce-scatter",
+            dispatcher_name="allgather",
+            group=self.tp_ep_group,
+        ):
             # Unpermute the tokens across ranks.
             if self.tp_size > 1 or self.ep_size > 1:
                 hidden_states = reduce_scatter_to_sequence_parallel_region(
@@ -742,19 +727,15 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
             self.shared_experts.wait_current_stream()
         # Perform expert parallel AlltoAll communication
         # BEGIN MEGALENS OBSERVABILITY
-        dispatch_gate = prepare_trace_scope("ep-alltoall-dispatch")
-        dispatch_context = (
-            ep_collective_trace_context(
-                self,
-                (permutated_local_input_tokens, permuted_probs),
-                comm_type="ep-alltoall",
-                dispatcher_name="alltoall",
-                group=self.ep_group,
-            )
-            if dispatch_gate is not None
-            else None
-        )
-        with open_trace_scope(dispatch_gate, "ep-alltoall-dispatch", attrs=dispatch_context):
+        with moe_probes.ep_collective_scope(
+            "ep-alltoall-dispatch",
+            self,
+            permutated_local_input_tokens,
+            permuted_probs,
+            comm_type="ep-alltoall",
+            dispatcher_name="alltoall",
+            group=self.ep_group,
+        ):
             self.tokens_per_expert = self._maybe_dtoh_and_synchronize(
                 "before_ep_alltoall", self.tokens_per_expert
             )
@@ -919,19 +900,14 @@ class MoEAlltoAllTokenDispatcher(MoETokenDispatcher):
         # Perform expert parallel AlltoAll communication
         # hidden_states: [SEQL, H] -> [SEQL, H/TP]
         # BEGIN MEGALENS OBSERVABILITY
-        combine_gate = prepare_trace_scope("ep-alltoall-combine")
-        combine_context = (
-            ep_collective_trace_context(
-                self,
-                (hidden_states,),
-                comm_type="ep-alltoall",
-                dispatcher_name="alltoall",
-                group=self.ep_group,
-            )
-            if combine_gate is not None
-            else None
-        )
-        with open_trace_scope(combine_gate, "ep-alltoall-combine", attrs=combine_context):
+        with moe_probes.ep_collective_scope(
+            "ep-alltoall-combine",
+            self,
+            hidden_states,
+            comm_type="ep-alltoall",
+            dispatcher_name="alltoall",
+            group=self.ep_group,
+        ):
             permutated_local_input_tokens = all_to_all(
                 self.ep_group,
                 hidden_states,
@@ -1628,24 +1604,14 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
         if self.shared_experts is not None:
             self.shared_experts.wait_current_stream()
         # BEGIN MEGALENS OBSERVABILITY
-        comm_type = (
-            "ep-hybridep"
-            if self.config.moe_flex_dispatcher_backend == "hybridep"
-            else "ep-deepep"
-        )
-        dispatch_gate = prepare_trace_scope("ep-alltoall-dispatch")
-        dispatch_context = (
-            ep_collective_trace_context(
-                self,
-                (hidden_states,),
-                comm_type=comm_type,
-                dispatcher_name="flex",
-                group=self.tp_ep_group,
-            )
-            if dispatch_gate is not None
-            else None
-        )
-        with open_trace_scope(dispatch_gate, "ep-alltoall-dispatch", attrs=dispatch_context):
+        with moe_probes.ep_collective_scope(
+            "ep-alltoall-dispatch",
+            self,
+            hidden_states,
+            comm_type=None,
+            dispatcher_name="flex",
+            group=self.tp_ep_group,
+        ):
             dispatched_hidden_states = self._comm_manager.dispatch(
                 hidden_states, async_finish, allocate_on_comm_stream
             )
@@ -1707,24 +1673,14 @@ class MoEFlexTokenDispatcher(MoETokenDispatcher):
         if self.shared_experts is not None:
             self.shared_experts.wait_current_stream()
         # BEGIN MEGALENS OBSERVABILITY
-        comm_type = (
-            "ep-hybridep"
-            if self.config.moe_flex_dispatcher_backend == "hybridep"
-            else "ep-deepep"
-        )
-        combine_gate = prepare_trace_scope("ep-alltoall-combine")
-        combine_context = (
-            ep_collective_trace_context(
-                self,
-                (hidden_states,),
-                comm_type=comm_type,
-                dispatcher_name="flex",
-                group=self.tp_ep_group,
-            )
-            if combine_gate is not None
-            else None
-        )
-        with open_trace_scope(combine_gate, "ep-alltoall-combine", attrs=combine_context):
+        with moe_probes.ep_collective_scope(
+            "ep-alltoall-combine",
+            self,
+            hidden_states,
+            comm_type=None,
+            dispatcher_name="flex",
+            group=self.tp_ep_group,
+        ):
             return self._comm_manager.combine(hidden_states, async_finish, allocate_on_comm_stream)
         # END MEGALENS OBSERVABILITY
 
