@@ -369,5 +369,339 @@
     "Numerical comparison covers printed loss and gradient norm, not complete tensor equality, convergence or overhead.",
     "Launch order means rank-local Python API invocation; it does not establish physical NCCL wire ordering or duration.",
     "CP, EP, CUDA Graph/CUPTI, FSDP, other accelerators, multi-node and long-run paths were not rerun for this refactor."
-  ]
+  ],
+  "cleanup": {
+    "status": "passed",
+    "code_revision": "4bd5ab8e07b435efb4e16aab2f8d5df9f3ffde40",
+    "code_tree": "a0a4491f3abed11ecff620f8d1920b7f604670e3",
+    "before_cleanup": "704533ec8fb40c0b8cfe82e250e3614775ff6d4c",
+    "acceptance": [
+      "G1.12",
+      "G1.13",
+      "G1.14",
+      "G1.15"
+    ],
+    "main_diff": {
+      "megatron/core/pipeline_parallel/combined_1f1b.py": {
+        "before": {
+          "added": 177,
+          "removed": 1
+        },
+        "after": {
+          "added": 31,
+          "removed": 0
+        }
+      },
+      "megatron/training/arguments.py": {
+        "before": {
+          "added": 122,
+          "removed": 23
+        },
+        "after": {
+          "added": 35,
+          "removed": 22
+        }
+      },
+      "megatron/core/transformer/moe/token_dispatcher.py": {
+        "before": {
+          "added": 182,
+          "removed": 54
+        },
+        "after": {
+          "added": 138,
+          "removed": 54
+        }
+      },
+      "megatron/core/transformer/moe/shared_experts.py": {
+        "before": {
+          "added": 108,
+          "removed": 73
+        },
+        "after": {
+          "added": 39,
+          "removed": 5
+        }
+      },
+      "megatron/core/transformer/moe/moe_layer.py": {
+        "before": {
+          "added": 195,
+          "removed": 42
+        },
+        "after": {
+          "added": 167,
+          "removed": 42
+        }
+      },
+      "megatron/core/distributed/finalize_model_grads.py": {
+        "before": {
+          "added": 127,
+          "removed": 13
+        },
+        "after": {
+          "added": 88,
+          "removed": 15
+        }
+      }
+    },
+    "cpu": {
+      "passed": 716,
+      "warnings": 11,
+      "source_target_scanner": "passed",
+      "target_live": 49,
+      "target_dead": 0,
+      "producer_inventory_change": "Two existing gradient events are now visible through explicit scope factories; runtime event sets and schemas are unchanged."
+    },
+    "source_comparisons": {
+      "passed": 82,
+      "relocated_helpers": [
+        "_combined_operation_id",
+        "_build_combined_step_context",
+        "_combined_step_context",
+        "_add_megalens_args",
+        "_validate_megalens_args"
+      ],
+      "native_combined_body_and_argument_positions_match_main": true,
+      "five_shared_stage_native_flows_match_main": true,
+      "EP_MoE_and_gradient_native_flows_match_before_cleanup": true,
+      "paired_Core_markers": "passed"
+    },
+    "committed_tree_checks": [
+      {
+        "acceptance": "G1.12",
+        "revision": "3b0565cd9",
+        "suites": [
+          "test_pipeline_schedule_observability.py"
+        ],
+        "returncode": 0,
+        "passed": 21
+      },
+      {
+        "acceptance": "G1.13",
+        "revision": "fc5d0b2dc",
+        "suites": [
+          "test_runtime_lifecycle.py",
+          "test_observability.py"
+        ],
+        "returncode": 0,
+        "passed": 75
+      },
+      {
+        "acceptance": "G1.15",
+        "revision": "42828c736",
+        "suites": [
+          "test_sp_layernorm_allreduce_observability.py",
+          "test_embedding_grads_allreduce_observability.py",
+          "test_all_grads_sync_observability.py",
+          "test_probe_contract_scan.py"
+        ],
+        "returncode": 0,
+        "passed": 57
+      },
+      {
+        "acceptance": "G1.14",
+        "revision": "4bd5ab8e0",
+        "suites": [
+          "test_ep_primitive_observability.py",
+          "test_moe_phase_observability.py",
+          "test_shared_expert_overlap_observability.py",
+          "test_probe_contract_scan.py"
+        ],
+        "returncode": 0,
+        "passed": 124
+      }
+    ],
+    "format": {
+      "black": "24.4.2",
+      "checked_python_files": 18,
+      "scope": "Whole probe files and changed regions of existing integration/test files; native arguments.py retains inherited formatting.",
+      "isort": "5.13.2",
+      "import_files": 16,
+      "container_check": "passed",
+      "git_diff_check": "passed"
+    },
+    "limits": [
+      "Combined GPU/FSDP training, EP allgather/Flex/HybridEP, CUDA Graph, the full FlagScale matrix, multi-node and other accelerators were not rerun.",
+      "No tensor equality, physical communication duration, convergence or trace-off overhead claim."
+    ],
+    "packaging": {
+      "status": "passed",
+      "python_files": 602,
+      "wheel": "megatron_core-0.18.2-cp312-cp312-linux_x86_64.whl",
+      "sdist": "megatron_core-0.18.2.tar.gz",
+      "sha256": {
+        "megatron_core-0.18.2-cp312-cp312-linux_x86_64.whl": "1bc85f1c77e866904a906c061086d5a674f979252ed3f71ef8e4a90c76b7c72f",
+        "megatron_core-0.18.2.tar.gz": "b8d5a9e590dc206ad18ff47291aad57b3f942ffd910a5919f08186f9d93f44c3"
+      }
+    },
+    "isolated_wheel_import": "passed",
+    "wheel_origin": {
+      "status": "passed",
+      "loaded_modules": 349,
+      "origins_and_installed_bytes_match_wheel": true
+    },
+    "hardware": {
+      "image_id": "sha256:0e9fe710a4eb0850376e336c8ed5bb399da5732c6b7365ff14bc7559dd632bdd",
+      "cuda": "12.8",
+      "nccl": [
+        2,
+        27,
+        5
+      ],
+      "python": "3.12.12",
+      "torch": "2.9.0+cu128",
+      "transformer_engine": "2.9.0+acced6d7",
+      "triton": "3.5.0",
+      "gpu_model": "NVIDIA H800",
+      "host_gpu_count": 8,
+      "driver": "580.105.08"
+    },
+    "training": [
+      {
+        "profile": "ep2-shared",
+        "world_size": 2,
+        "status": "passed",
+        "iterations_per_run": 2,
+        "trace_modes": [
+          "off",
+          "on"
+        ],
+        "checkpoint_iteration": 2,
+        "training_arguments_equal": true,
+        "printed_loss_and_grad_norm_equal": true,
+        "trace_shards": {
+          "off": 0,
+          "on": 2
+        },
+        "trace_records": {
+          "off": 0,
+          "on": 472
+        },
+        "audited_python_files_per_worker": 651,
+        "trace_contract": "Existing ep2-alltoall event/checkpoint requirements; shared-expert stages in order for both layers on every rank and iteration; balanced nested B/E.",
+        "balanced_iterations_by_rank": {
+          "0": [
+            1,
+            2
+          ],
+          "1": [
+            1,
+            2
+          ]
+        },
+        "metrics": {
+          "1": {
+            "loss": "6.944428E+00",
+            "grad_norm": "1.338"
+          },
+          "2": {
+            "loss": "6.958249E+00",
+            "grad_norm": "1.336"
+          }
+        },
+        "attempts": {
+          "off": [
+            {
+              "label": "ep2-shared-off",
+              "returncode": 0
+            }
+          ],
+          "on": [
+            {
+              "label": "ep2-shared-on",
+              "returncode": 0
+            }
+          ]
+        }
+      },
+      {
+        "profile": "tp2-pp2-tied",
+        "world_size": 4,
+        "status": "passed",
+        "iterations_per_run": 2,
+        "trace_modes": [
+          "off",
+          "on"
+        ],
+        "checkpoint_iteration": 2,
+        "training_arguments_equal": true,
+        "printed_loss_and_grad_norm_equal": true,
+        "trace_shards": {
+          "off": 0,
+          "on": 4
+        },
+        "trace_records": {
+          "off": 0,
+          "on": 3808
+        },
+        "audited_python_files_per_worker": 651,
+        "trace_contract": "Existing TP2/SP event/checkpoint requirements and _validate_final_grad_sync with actual TP/PP rank coordinates; SUM, SP and embedding peers, group slots and balanced nested B/E.",
+        "balanced_iterations_by_rank": {
+          "0": [
+            1,
+            2
+          ],
+          "1": [
+            1,
+            2
+          ],
+          "2": [
+            1,
+            2
+          ],
+          "3": [
+            1,
+            2
+          ]
+        },
+        "metrics": {
+          "1": {
+            "loss": "6.954717E+00",
+            "grad_norm": "1.294"
+          },
+          "2": {
+            "loss": "6.961879E+00",
+            "grad_norm": "1.265"
+          }
+        },
+        "attempts": {
+          "off": [
+            {
+              "label": "tp2-pp2-tied-off",
+              "returncode": 0
+            }
+          ],
+          "on": [
+            {
+              "label": "tp2-pp2-tied-on",
+              "returncode": 1
+            },
+            {
+              "label": "tp2-pp2-tied-on-retry",
+              "returncode": 0
+            }
+          ]
+        }
+      }
+    ],
+    "training_summary": {
+      "successful_runs": 4,
+      "successful_workers": 12,
+      "readonly_source_overlays": 16,
+      "audited_python_files_per_worker": 651,
+      "on_shards": 6,
+      "on_records": 4280,
+      "off_shards": 0,
+      "extra_HKR_instrumentation": false,
+      "hardware_monitoring": false,
+      "CUPTI": false,
+      "initialization_failure": {
+        "profile": "tp2-pp2-tied-on",
+        "stage": "torch.cuda.set_device before training",
+        "error": "CUDA out of memory",
+        "cause": "unknown",
+        "retry": "Passed with unchanged source, arguments and devices; both attempts retained. This does not establish a fix for the initialization failure."
+      }
+    },
+    "runtime_evidence_archive_sha256": "60e21539b2c9ef05585ad595bb4a1c0f068ec5a0fe08578bbb7c5d4cdc0e72d4"
+  }
 }

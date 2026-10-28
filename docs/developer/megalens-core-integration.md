@@ -11,8 +11,11 @@ with observation calls at the boundaries that define each event. Paired
 |---|---|---|
 | `core/pipeline_parallel/p2p_communication.py` | `megalens/probes/p2p.py` | Launch, raw Work registration, wait and existing synchronization |
 | `core/pipeline_parallel/schedules.py` | `megalens/probes/pipeline.py` | Forward/backward phases, workload FIFO and gradient synchronization |
+| `core/pipeline_parallel/combined_1f1b.py` | `megalens/probes/pipeline.py` | Original combined function body and native FSDP hooks |
 | `core/tensor_parallel/mappings.py` | `megalens/probes/tp.py` | Original equal/unequal collective branches and tensor transformations |
 | `training/training.py` | `megalens/probes/training.py` | Runtime ownership and the iteration envelope containing skip/continue/break |
+| `training/arguments.py` | `megalens/probes/training.py` | Existing CLI registration and validation calls |
+| `core/distributed/finalize_model_grads.py` | `megalens/probes/dp.py` | Native embedding/SP all-reduce calls and tensor views |
 | DP and MoE entry points | `megalens/probes/dp.py`, `megalens/probes/moe.py` | Existing coalescing, stream, handle and postprocess boundaries |
 
 Paths in the table are relative to `megatron/`. The generic
@@ -30,6 +33,40 @@ package. Their callers retain the local scopes needed to observe failures and
 early exits. The mode-1 iteration barrier stays before scope entry; skipped
 iterations close the existing trace window. Tensor-parallel helpers preserve
 the single-rank AllReduce scope and each event's existing group-slot timing.
+
+Combined 1F1B decorates the original native function directly. It retains the
+two existing observation arguments after the native arguments without a second
+copy of the full forwarding signature. MoE phase and EP metadata are prepared
+inside the probe package. Gradient reductions keep their native calls in Core;
+the probe fills peer ranks only after a successful collective.
+
+## Keeping indentation changes small
+
+When a probe covers the body of an existing context, use a standard multiple
+context-manager statement:
+
+```python
+with (
+    cur_platform.stream(self.stream),
+    moe_probes.shared_expert_overlap_scope(self, "pre_forward_comm"),
+):
+    # Native computation keeps its original indentation.
+    ...
+```
+
+Python enters the stream before evaluating the probe expression, and exits the
+probe before exiting the stream. This preserves metadata preparation and scope
+boundaries while avoiding an extra indentation level in five shared-expert
+stages. Use the existing decorator for scopes that already cover an entire
+function. Keep local `with` blocks when the measured region covers only part of
+a function. Preserve normal Black formatting and readable calls.
+
+Review remaining indentation-only changes with
+`rtk proxy git diff -w b471409ac -- <path>` alongside the normal diff against that
+same fixed upstream main revision. Do not change native computation, introduce
+manual start/stop, or move argument evaluation outside its scope to reduce the
+displayed diff. Format changed regions when an inherited file has unrelated
+formatting differences.
 
 ## Invariants when updating upstream
 
@@ -60,6 +97,10 @@ field construction, raw Work identity, exceptions and import boundaries.
 The focused suites are `test_p2p_observability.py`,
 `test_pipeline_schedule_observability.py`, `test_runtime_lifecycle.py` and the
 three `test_tp_*_observability.py` suites under `tests/megalens/`.
+MoE and gradient cleanup also uses `test_ep_primitive_observability.py`,
+`test_moe_phase_observability.py`, `test_shared_expert_overlap_observability.py`,
+`test_sp_layernorm_allreduce_observability.py` and
+`test_embedding_grads_allreduce_observability.py`.
 
 For a structural refactor, compare moved definitions and preserved native
 functions by AST against the fixed source revisions. Compare P2P after inlining
@@ -79,3 +120,5 @@ training/dependency fixes and their merge dependencies.
 The [validation record](megalens-core-validation.json) fixes the reviewed code
 revisions and records the source comparisons, CPU gate, packaging, installed
 module origins and focused H800 training/NCCL results, with their evidence limits.
+Its `cleanup` entry records the subsequent helper and indentation cleanup against
+its own source revision; earlier hardware results retain their original revision.
