@@ -12,6 +12,7 @@ from megatron.core.fp8_utils import get_fp8_context
 
 # BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.observability import scoped_forward
+from megatron.megalens.probes import pipeline as pipeline_probes
 
 # END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.pipeline_parallel.utils import (
@@ -24,104 +25,6 @@ from megatron.core.utils import get_attr_wrapped_model
 
 # Types
 Shape = Union[List[int], torch.Size]
-
-
-# BEGIN MEGALENS OBSERVABILITY
-def _combined_operation_id(microbatch, vp_stage):
-    if microbatch is None:
-        return None
-    vp_identity = "none" if vp_stage is None else vp_stage
-    return f"pp:microbatch={microbatch}:vp={vp_identity}"
-
-
-def _build_combined_step_context(
-    *, f_model, b_model, current_microbatch, backward_microbatch, f_vp_stage, b_vp_stage
-):
-    forward_active = f_model is not None
-    backward_active = b_model is not None
-    forward_operation_id = (
-        _combined_operation_id(current_microbatch, f_vp_stage) if forward_active else None
-    )
-    backward_operation_id = (
-        _combined_operation_id(backward_microbatch, b_vp_stage) if backward_active else None
-    )
-    if forward_active and backward_active:
-        execution_mode = "combined"
-    elif forward_active:
-        execution_mode = "forward"
-    else:
-        execution_mode = "backward"
-    return {
-        "operation_id": (
-            f"pp-combined:forward={forward_operation_id}:backward={backward_operation_id}"
-        ),
-        "forward_operation_id": forward_operation_id,
-        "backward_operation_id": backward_operation_id,
-        "forward_microbatch": current_microbatch if forward_active else None,
-        "backward_microbatch": backward_microbatch if backward_active else None,
-        "forward_vp_stage": f_vp_stage if forward_active else None,
-        "backward_vp_stage": b_vp_stage if backward_active else None,
-        "execution_mode": execution_mode,
-        "overlap_active": execution_mode == "combined",
-        "schedule": "combined-1f1b",
-        "timing_phase": "framework_phase",
-    }
-
-
-def _combined_step_context(
-    forward_step_func,
-    data_iterator,
-    f_model,
-    num_microbatches,
-    input_tensor,
-    forward_data_store,
-    b_model,
-    b_input_tensor,
-    b_output_tensor,
-    b_output_tensor_grad,
-    config,
-    f_model_chunk_id=None,
-    pre_forward=None,
-    pre_backward=None,
-    post_forward=None,
-    post_backward=None,
-    collect_non_loss_data=False,
-    checkpoint_activations_microbatch=None,
-    is_first_microbatch=False,
-    current_microbatch=None,
-    encoder_decoder_xattn=False,
-    fsdp_wrapper=None,
-    backward_microbatch=None,
-    b_model_chunk_id=None,
-):
-    del (
-        forward_step_func,
-        data_iterator,
-        num_microbatches,
-        input_tensor,
-        forward_data_store,
-        b_input_tensor,
-        b_output_tensor,
-        b_output_tensor_grad,
-        config,
-        pre_forward,
-        pre_backward,
-        post_forward,
-        post_backward,
-        collect_non_loss_data,
-        checkpoint_activations_microbatch,
-        is_first_microbatch,
-        encoder_decoder_xattn,
-    )
-    return _build_combined_step_context(
-        f_model=f_model,
-        b_model=b_model,
-        current_microbatch=current_microbatch,
-        backward_microbatch=backward_microbatch,
-        f_vp_stage=f_model_chunk_id,
-        b_vp_stage=b_model_chunk_id,
-    )
-# END MEGALENS OBSERVABILITY
 
 
 def combined_1f1b_schedule_for_no_pipelining(
@@ -386,7 +289,12 @@ def combined_1f1b_schedule_for_interleaved_pipelining(
     return output_tensor, input_tensor_grad
 
 
-def _combined_forward_backward_step_impl(
+# BEGIN MEGALENS OBSERVABILITY
+@scoped_forward(
+    "combined-forward-backward-step", ctx_factory=pipeline_probes._combined_step_context
+)
+# END MEGALENS OBSERVABILITY
+def combined_forward_backward_step(
     forward_step_func,
     data_iterator,
     f_model,
@@ -409,6 +317,10 @@ def _combined_forward_backward_step_impl(
     current_microbatch=None,
     encoder_decoder_xattn=False,
     fsdp_wrapper=None,
+    # BEGIN MEGALENS OBSERVABILITY
+    backward_microbatch=None,
+    b_model_chunk_id=None,
+    # END MEGALENS OBSERVABILITY
 ):
     """Merged forward and backward step for combined 1f1b scheduler.
 
@@ -620,60 +532,3 @@ def _combined_forward_backward_step_impl(
         fsdp_wrapper.post_backward()
 
     return output_tensor, num_tokens, input_tensor_grad
-
-
-# BEGIN MEGALENS OBSERVABILITY
-@scoped_forward("combined-forward-backward-step", ctx_factory=_combined_step_context)
-def combined_forward_backward_step(
-    forward_step_func,
-    data_iterator,
-    f_model,
-    num_microbatches,
-    input_tensor,
-    forward_data_store,
-    b_model,
-    b_input_tensor,
-    b_output_tensor,
-    b_output_tensor_grad,
-    config,
-    f_model_chunk_id=None,
-    pre_forward=None,
-    pre_backward=None,
-    post_forward=None,
-    post_backward=None,
-    collect_non_loss_data=False,
-    checkpoint_activations_microbatch=None,
-    is_first_microbatch=False,
-    current_microbatch=None,
-    encoder_decoder_xattn=False,
-    fsdp_wrapper=None,
-    backward_microbatch=None,
-    b_model_chunk_id=None,
-):
-    """Run one fused schedule span without double-counting overlapping forward/backward work."""
-    del backward_microbatch, b_model_chunk_id
-    return _combined_forward_backward_step_impl(
-        forward_step_func,
-        data_iterator,
-        f_model,
-        num_microbatches,
-        input_tensor,
-        forward_data_store,
-        b_model,
-        b_input_tensor,
-        b_output_tensor,
-        b_output_tensor_grad,
-        config,
-        f_model_chunk_id=f_model_chunk_id,
-        pre_forward=pre_forward,
-        pre_backward=pre_backward,
-        post_forward=post_forward,
-        post_backward=post_backward,
-        collect_non_loss_data=collect_non_loss_data,
-        checkpoint_activations_microbatch=checkpoint_activations_microbatch,
-        is_first_microbatch=is_first_microbatch,
-        current_microbatch=current_microbatch,
-        encoder_decoder_xattn=encoder_decoder_xattn,
-        fsdp_wrapper=fsdp_wrapper,
-    )
-# END MEGALENS OBSERVABILITY

@@ -7,7 +7,7 @@ from typing import Any, Mapping, Sequence
 import pytest
 import torch
 
-from megatron.core.observability import install_trace_sink, reset_trace_sink
+from megatron.core.observability import install_trace_sink, reset_trace_sink, scoped_forward
 from megatron.core.pipeline_parallel import combined_1f1b, schedules
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.megalens.probes import pipeline as pipeline_probes
@@ -883,6 +883,17 @@ def test_loss_error_closes_nested_phases_and_propagates_exact_exception() -> Non
     ]
 
 
+def _stub_combined_compute(monkeypatch, compute):
+    """Stub native compute while exercising the public scope and scheduler metadata."""
+    monkeypatch.setattr(
+        combined_1f1b,
+        "combined_forward_backward_step",
+        scoped_forward(
+            "combined-forward-backward-step", ctx_factory=pipeline_probes._combined_step_context
+        )(compute),
+    )
+
+
 def test_combined_no_pipeline_schedule_records_both_operation_identities(monkeypatch) -> None:
     sink = _RecordingSink()
     install_trace_sink(sink)
@@ -894,7 +905,7 @@ def test_combined_no_pipeline_schedule_records_both_operation_identities(monkeyp
         f_model = args[2]
         return object() if f_model is not None else None, 1 if f_model is not None else None, None
 
-    monkeypatch.setattr(combined_1f1b, "_combined_forward_backward_step_impl", fake_combined_step)
+    _stub_combined_compute(monkeypatch, fake_combined_step)
 
     forward_data_store, total_num_tokens = combined_1f1b.combined_1f1b_schedule_for_no_pipelining(
         forward_step_func=lambda *args, **kwargs: None,
@@ -943,14 +954,12 @@ def test_combined_no_pipeline_schedule_records_both_operation_identities(monkeyp
 def test_combined_schedule_null_sink_skips_identity_context(monkeypatch) -> None:
     monkeypatch.setattr(combined_1f1b, "set_streams", lambda **kwargs: None)
     monkeypatch.setattr(
-        combined_1f1b,
+        pipeline_probes,
         "_build_combined_step_context",
         lambda **kwargs: pytest.fail("trace-off path built combined schedule context"),
     )
-    monkeypatch.setattr(
-        combined_1f1b,
-        "_combined_forward_backward_step_impl",
-        lambda *args, **kwargs: (object() if args[2] is not None else None, 1, None),
+    _stub_combined_compute(
+        monkeypatch, lambda *args, **kwargs: (object() if args[2] is not None else None, 1, None)
     )
 
     _, total_num_tokens = combined_1f1b.combined_1f1b_schedule_for_no_pipelining(
@@ -979,11 +988,7 @@ def test_combined_interleaved_schedule_records_forward_and_backward_vp_identity(
     sink = _RecordingSink()
     install_trace_sink(sink)
     monkeypatch.setattr(combined_1f1b, "set_streams", lambda **kwargs: None)
-    monkeypatch.setattr(
-        combined_1f1b,
-        "_combined_forward_backward_step_impl",
-        lambda *args, **kwargs: (object(), 1, None),
-    )
+    _stub_combined_compute(monkeypatch, lambda *args, **kwargs: (object(), 1, None))
     forward_post_calls = []
     backward_post_calls = []
 
@@ -1027,16 +1032,26 @@ def test_combined_step_forwards_native_fsdp_wrapper(monkeypatch, trace_enabled, 
     sink = _RecordingSink()
     if trace_enabled:
         install_trace_sink(sink)
-    wrapper = object()
-    output = (object(), object(), object())
-    received = []
+    timeline = []
+    output = object()
 
-    def native_step(*args, **kwargs):
-        received.append(kwargs["fsdp_wrapper"])
-        return output
+    class FSDPWrapper:
+        def pre_backward(self):
+            timeline.append("pre-backward")
 
-    monkeypatch.setattr(combined_1f1b, "_combined_forward_backward_step_impl", native_step)
-    args = [None, None, object(), 1, None, [], object(), None, None, None, _phase_config()]
+        def post_backward(self):
+            timeline.append("post-backward")
+
+    class BackwardPlan:
+        @staticmethod
+        def run(*args, **kwargs):
+            timeline.append("compute")
+            return output
+
+    wrapper = FSDPWrapper()
+    backward_output = SimpleNamespace(schedule_plan=BackwardPlan(), loss_func=None)
+    config = SimpleNamespace(enable_autocast=False, fp8=False)
+    args = [None, None, None, 1, None, [], object(), None, backward_output, object(), config]
     kwargs = {"backward_microbatch": 0, "b_model_chunk_id": 1}
     if positional_fsdp:
         # All native arguments through fsdp_wrapper retain their upstream position.
@@ -1045,6 +1060,11 @@ def test_combined_step_forwards_native_fsdp_wrapper(monkeypatch, trace_enabled, 
         kwargs["fsdp_wrapper"] = wrapper
     result = combined_1f1b.combined_forward_backward_step(*args, **kwargs)
 
-    assert result is output
-    assert received == [wrapper]
+    assert result == (output, None, None)
+    assert timeline == ["pre-backward", "compute", "post-backward"]
+    assert backward_output.schedule_plan is None
     assert len(sink.records) == int(trace_enabled)
+    if trace_enabled:
+        assert sink.records[0]["ctx"]["execution_mode"] == "backward"
+        assert sink.records[0]["ctx"]["forward_operation_id"] is None
+        assert sink.records[0]["ctx"]["backward_operation_id"] == "pp:microbatch=0:vp=1"

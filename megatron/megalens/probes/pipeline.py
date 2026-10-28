@@ -86,3 +86,99 @@ def _pipeline_grad_sync_scope(schedule):
     gate = prepare_trace_scope("grad-sync")
     ctx = _pipeline_grad_sync_context(schedule) if gate is not None else None
     return open_trace_scope(gate, "grad-sync", ctx=ctx)
+
+
+def _combined_operation_id(microbatch, vp_stage):
+    if microbatch is None:
+        return None
+    vp_identity = "none" if vp_stage is None else vp_stage
+    return f"pp:microbatch={microbatch}:vp={vp_identity}"
+
+
+def _build_combined_step_context(
+    *, f_model, b_model, current_microbatch, backward_microbatch, f_vp_stage, b_vp_stage
+):
+    forward_active = f_model is not None
+    backward_active = b_model is not None
+    forward_operation_id = (
+        _combined_operation_id(current_microbatch, f_vp_stage) if forward_active else None
+    )
+    backward_operation_id = (
+        _combined_operation_id(backward_microbatch, b_vp_stage) if backward_active else None
+    )
+    if forward_active and backward_active:
+        execution_mode = "combined"
+    elif forward_active:
+        execution_mode = "forward"
+    else:
+        execution_mode = "backward"
+    return {
+        "operation_id": (
+            f"pp-combined:forward={forward_operation_id}:backward={backward_operation_id}"
+        ),
+        "forward_operation_id": forward_operation_id,
+        "backward_operation_id": backward_operation_id,
+        "forward_microbatch": current_microbatch if forward_active else None,
+        "backward_microbatch": backward_microbatch if backward_active else None,
+        "forward_vp_stage": f_vp_stage if forward_active else None,
+        "backward_vp_stage": b_vp_stage if backward_active else None,
+        "execution_mode": execution_mode,
+        "overlap_active": execution_mode == "combined",
+        "schedule": "combined-1f1b",
+        "timing_phase": "framework_phase",
+    }
+
+
+def _combined_step_context(
+    forward_step_func,
+    data_iterator,
+    f_model,
+    num_microbatches,
+    input_tensor,
+    forward_data_store,
+    b_model,
+    b_input_tensor,
+    b_output_tensor,
+    b_output_tensor_grad,
+    config,
+    f_model_chunk_id=None,
+    pre_forward=None,
+    pre_backward=None,
+    post_forward=None,
+    post_backward=None,
+    collect_non_loss_data=False,
+    checkpoint_activations_microbatch=None,
+    is_first_microbatch=False,
+    current_microbatch=None,
+    encoder_decoder_xattn=False,
+    fsdp_wrapper=None,
+    backward_microbatch=None,
+    b_model_chunk_id=None,
+):
+    del (
+        forward_step_func,
+        data_iterator,
+        num_microbatches,
+        input_tensor,
+        forward_data_store,
+        b_input_tensor,
+        b_output_tensor,
+        b_output_tensor_grad,
+        config,
+        pre_forward,
+        pre_backward,
+        post_forward,
+        post_backward,
+        collect_non_loss_data,
+        checkpoint_activations_microbatch,
+        is_first_microbatch,
+        encoder_decoder_xattn,
+    )
+    return _build_combined_step_context(
+        f_model=f_model,
+        b_model=b_model,
+        current_microbatch=current_microbatch,
+        backward_microbatch=backward_microbatch,
+        f_vp_stage=f_model_chunk_id,
+        b_vp_stage=b_model_chunk_id,
+    )
