@@ -68,6 +68,38 @@ manual start/stop, or move argument evaluation outside its scope to reduce the
 displayed diff. Format changed regions when an inherited file has unrelated
 formatting differences.
 
+## Keeping native functions aligned in diffs
+
+Preserve the order of upstream functions and methods. Place added integration
+helpers after the original function they support, or after the native methods
+at the end of their class. P2P's `_p2p_groups` follows `_p2p_ops`; the five MoE
+helpers follow `MoELayer.backward_dw`. This keeps the native `_p2p_ops` and
+`postprocess` declarations aligned in the default Git diff.
+
+Compare each path with the fixed main revision using the default diff first:
+
+```bash
+rtk proxy git diff --no-ext-diff --no-color --unified=3 b471409ac -- <path>
+rtk proxy git diff --word-diff=plain b471409ac -- <path>
+rtk proxy git diff -w b471409ac -- <path>
+```
+
+Retain upstream text for functions that do not need observation changes,
+including their docstrings, comments, imports and call layout. Keep observation
+markers around the added imports and calls. Apply normal formatting to new
+regions; whole-file import sorting or formatting can reintroduce unrelated
+changes to inherited code.
+
+The `diff_review` validation entry records G1.16's review of all 142 MR paths:
+36 existing files and 106 additions, including 82 added Python files checked
+for syntax. It lists the existing paths individually and identifies the ten
+adjusted modules. Native definition order was checked across 959 function
+entries; all 864 functions with unchanged AST have identical upstream text.
+The `backward_step` signature still spans changed lines because of its existing
+observation keyword parameters. This is an actual signature extension to review.
+MoE's diff line count can grow when helper definitions are separated from the
+native `postprocess`; declaration alignment is the acceptance criterion.
+
 ## Invariants when updating upstream
 
 - Preserve native signatures, branch order, return values, exceptions and raw
@@ -122,3 +154,5 @@ revisions and records the source comparisons, CPU gate, packaging, installed
 module origins and focused H800 training/NCCL results, with their evidence limits.
 Its `cleanup` entry records the subsequent helper and indentation cleanup against
 its own source revision; earlier hardware results retain their original revision.
+The `diff_review` entry fixes G1.16's source identity and CPU/structural checks;
+it adds no GPU, packaging or performance result for that source revision.

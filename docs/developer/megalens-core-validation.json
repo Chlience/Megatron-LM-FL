@@ -703,5 +703,218 @@
       }
     },
     "runtime_evidence_archive_sha256": "60e21539b2c9ef05585ad595bb4a1c0f068ec5a0fe08578bbb7c5d4cdc0e72d4"
+  },
+  "diff_review": {
+    "status": "passed",
+    "acceptance": [
+      "G1.16"
+    ],
+    "code_revision": "32483d69a2690cc1479407867e40687fcf41e518",
+    "code_tree": "901b6c03298c6515d47c68b01466b5bbce37c3e5",
+    "before_revision": "743cf0f4d824d3c960a22e91e503b8bdb33adda8",
+    "upstream_main": "b471409ac414d760c42a4b159725c2acd2676166",
+    "mixedpara_baseline": "12fb7169ce30fdb62b50f86b41afa09336a523ea",
+    "coverage": {
+      "reviewed_paths": 142,
+      "existing_files": 36,
+      "added_files": 106,
+      "adjusted_files": 10,
+      "added_python_files_parsed": 82,
+      "native_function_entries_checked": 959,
+      "upstream_identical_function_text": 864,
+      "native_definition_order": "preserved",
+      "default_diff_native_headers_aligned": [
+        "_p2p_ops",
+        "MoELayer.postprocess"
+      ],
+      "remaining_changed_signature": [
+        {
+          "path": "megatron/core/pipeline_parallel/schedules.py",
+          "declarations": [
+            "backward_step"
+          ],
+          "reason": "Existing observation keyword parameters require a multiline signature; not a helper alignment."
+        }
+      ]
+    },
+    "reviewed_existing_files": {
+      ".github/configs/cuda.yml": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "MANIFEST.in": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "README.md": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "docs/index.md": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "docs/user-guide/features/index.md": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/core/distributed/finalize_model_grads.py": "Remove observation markers from an unchanged native import.",
+      "megatron/core/distributed/param_and_grad_buffer.py": "Restore native import layout; format two observation calls normally.",
+      "megatron/core/models/bert/bert_model.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/core/models/gpt/fine_grained_callables.py": "Restore native imports and FlagScale comments.",
+      "megatron/core/models/gpt/gpt_model.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/core/optimizer/optimizer.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/core/pipeline_parallel/combined_1f1b.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/core/pipeline_parallel/hybrid_cp_schedule.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/core/pipeline_parallel/p2p_communication.py": "Place _p2p_groups after _p2p_ops; restore native imports and _communicate_shapes text.",
+      "megatron/core/pipeline_parallel/schedules.py": "Restore three native token-count allocation lines.",
+      "megatron/core/tensor_parallel/layers.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/core/tensor_parallel/mappings.py": "Restore native allocation layout and comments.",
+      "megatron/core/transformer/attention.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/core/transformer/mlp.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/core/transformer/moe/moe_layer.py": "Place five helpers after native class methods; restore postprocess docstring and FlagScale comment.",
+      "megatron/core/transformer/moe/paged_stash.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/core/transformer/moe/router.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/core/transformer/moe/shared_experts.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/core/transformer/moe/token_dispatcher.py": "Restore native _maybe_dtoh_and_synchronize text.",
+      "megatron/core/transformer/transformer_layer.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/core/utils.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/plugin/dualpipev/dualpipev_schedules.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/plugin/dualpipev/fb_overlap/overlap_funcs/fwdbwd.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/training/arguments.py": "Restore unrelated native imports and function text; retain only the observation import and two calls in the main diff.",
+      "megatron/training/global_vars.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "megatron/training/training.py": "Restore native imports and save_checkpoint_and_time text; isolate added runtime imports.",
+      "pyproject.toml": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "tests/unit_tests/a2a_overlap/test_schedule_dualpipev.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "tests/unit_tests/test_utils.py": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "tools/autoformat.sh": "Reviewed default main diff; existing MR changes retained without further edits.",
+      "uv.lock": "Reviewed default main diff; existing MR changes retained without further edits."
+    },
+    "main_diff": {
+      "megatron/core/distributed/finalize_model_grads.py": {
+        "before": {
+          "added": 88,
+          "removed": 15
+        },
+        "after": {
+          "added": 84,
+          "removed": 15
+        }
+      },
+      "megatron/core/distributed/param_and_grad_buffer.py": {
+        "before": {
+          "added": 127,
+          "removed": 56
+        },
+        "after": {
+          "added": 122,
+          "removed": 56
+        }
+      },
+      "megatron/core/models/gpt/fine_grained_callables.py": {
+        "before": {
+          "added": 36,
+          "removed": 8
+        },
+        "after": {
+          "added": 28,
+          "removed": 4
+        }
+      },
+      "megatron/core/pipeline_parallel/p2p_communication.py": {
+        "before": {
+          "added": 78,
+          "removed": 18
+        },
+        "after": {
+          "added": 73,
+          "removed": 17
+        }
+      },
+      "megatron/core/pipeline_parallel/schedules.py": {
+        "before": {
+          "added": 443,
+          "removed": 167
+        },
+        "after": {
+          "added": 434,
+          "removed": 164
+        }
+      },
+      "megatron/core/tensor_parallel/mappings.py": {
+        "before": {
+          "added": 56,
+          "removed": 15
+        },
+        "after": {
+          "added": 45,
+          "removed": 11
+        }
+      },
+      "megatron/core/transformer/moe/moe_layer.py": {
+        "before": {
+          "added": 167,
+          "removed": 42
+        },
+        "after": {
+          "added": 178,
+          "removed": 47
+        }
+      },
+      "megatron/core/transformer/moe/token_dispatcher.py": {
+        "before": {
+          "added": 138,
+          "removed": 54
+        },
+        "after": {
+          "added": 135,
+          "removed": 53
+        }
+      },
+      "megatron/training/arguments.py": {
+        "before": {
+          "added": 35,
+          "removed": 22
+        },
+        "after": {
+          "added": 12,
+          "removed": 0
+        }
+      },
+      "megatron/training/training.py": {
+        "before": {
+          "added": 275,
+          "removed": 234
+        },
+        "after": {
+          "added": 265,
+          "removed": 226
+        }
+      }
+    },
+    "source_comparisons": {
+      "adjusted_modules": 10,
+      "import_bindings": "identical to before_revision",
+      "non_import_AST": "Identical after normalizing only the relocated P2P/MoE helper positions and the restored MoELayer.postprocess docstring.",
+      "probe_implementation_and_scanner_fixture_bytes": "unchanged",
+      "source_sha256": {
+        "megatron/core/distributed/finalize_model_grads.py": "d94719091ff85f0fe582d85e10a5bf25ddac571fca86fdad0efae15f12ce9f77",
+        "megatron/core/distributed/param_and_grad_buffer.py": "a3d8fd16af2a15d096f8eeeb211b5da1c8e8b6f1421becc59ccb75d488fbd29c",
+        "megatron/core/models/gpt/fine_grained_callables.py": "33270232c86c9060178bcc6039f275b9bb1b2d552c8ab01cbcf71ffd4559a46b",
+        "megatron/core/pipeline_parallel/p2p_communication.py": "d84229397b6e4496b0ebcaf57feca67cdda05d3bac8633e01fc60e6a9c7ad663",
+        "megatron/core/pipeline_parallel/schedules.py": "6a9033861bf310f537075a7ddfc395670e3bc34e828816bdb0b5cb26835bce91",
+        "megatron/core/tensor_parallel/mappings.py": "7a16cecd2bcdb8baade70e50f63131cfa19c5a13ba74c4fb2df88ee810085e29",
+        "megatron/core/transformer/moe/moe_layer.py": "993a5204b1b75aa7b9930fe20328ee4d575a0487c979585856d3ac28ff32bbe4",
+        "megatron/core/transformer/moe/token_dispatcher.py": "5d13890a1afa93b129317bb742640f3f340fca36011ee63120c57d9449d9d823",
+        "megatron/training/arguments.py": "11d5ed3f4330ef0380880ee4cc88b1a39e3f3f1559bc95e04c71c75ec2f4b8b7",
+        "megatron/training/training.py": "9cc2f84ed96cb19fde7c098a29914b022a8203954222f4c04910dc2533befa68"
+      }
+    },
+    "cpu": {
+      "passed": 716,
+      "warnings": 11,
+      "source_target_scanner": "passed",
+      "target_live": 49,
+      "target_dead": 0
+    },
+    "format": {
+      "black": "24.4.2",
+      "black_regions": 8,
+      "isort": "5.13.2",
+      "observation_import_blocks": 14,
+      "full_file_isort_proposals_reviewed": 6,
+      "native_format_policy": "Inherited upstream imports, comments, whitespace and call layouts are preserved; full-file isort proposals are reviewed without applying native-only changes.",
+      "git_diff_check": "Passed against fixed upstream main for the ten adjusted source files; not a whole-MR whitespace check."
+    },
+    "limits": [
+      "GPU/NCCL training, packaging and performance were not rerun for this code revision; earlier evidence retains its original source identity.",
+      "Required local scopes, training iteration envelope, DP stream/coalescing and independent training fixes remain unchanged.",
+      "Existing whitespace issues in other MR files remain outside this formatting-only scope."
+    ]
   }
 }
