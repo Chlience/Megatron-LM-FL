@@ -6,6 +6,9 @@ training observation hooks, Trace runtime/export/loading, and the five retained
 analysis families. Independent training and dependency fixes are reviewed in
 their owning repositories with their own regression tests.
 
+The [Core integration review guide](megalens-core-integration.md) describes probe
+ownership, the native control-flow boundaries and checks for upstream updates.
+
 ## Independent submissions
 
 All seven submissions are Draft MRs. Follow their links for current merge status.
@@ -91,7 +94,8 @@ Black/isort checks passed for the affected native/TE files and relevant tests;
 FlagScale's new tests passed Ruff and formatting; all staged diffs passed
 whitespace and scope checks. The 781 main-integration CPU checks and packaging
 results remain evidence for source revision `690c9d9f096da6bfe4c578361986e7d62442274b`.
-This coordination change leaves those implementation bytes unchanged.
+The subsequent Core integration refactor has its own validation; these historical
+results are not evidence for changed implementation files.
 
 ## Merge and patch retirement
 

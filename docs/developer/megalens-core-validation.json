@@ -1,0 +1,373 @@
+{
+  "status": "passed",
+  "code_revision": "4b8892729ab924ddf8994649a8880f120fb7c094",
+  "code_tree": "2909995b8e71cdfc2ae48602c39d2daca6364f2b",
+  "upstream_main": "b471409ac414d760c42a4b159725c2acd2676166",
+  "before_refactor": "42acc56a8326a906f121cdecfab3b1018bc35c5d",
+  "mixedpara_baseline": "12fb7169ce30fdb62b50f86b41afa09336a523ea",
+  "acceptance": [
+    "G1.9",
+    "G1.10",
+    "G1.11"
+  ],
+  "main_diff": {
+    "megatron/core/pipeline_parallel/p2p_communication.py": {
+      "before": {
+        "added": 110,
+        "removed": 67
+      },
+      "after": {
+        "added": 78,
+        "removed": 18
+      }
+    },
+    "megatron/core/pipeline_parallel/schedules.py": {
+      "before": {
+        "added": 535,
+        "removed": 166
+      },
+      "after": {
+        "added": 443,
+        "removed": 167
+      }
+    },
+    "megatron/core/tensor_parallel/mappings.py": {
+      "before": {
+        "added": 130,
+        "removed": 16
+      },
+      "after": {
+        "added": 56,
+        "removed": 15
+      }
+    },
+    "megatron/training/training.py": {
+      "before": {
+        "added": 306,
+        "removed": 234
+      },
+      "after": {
+        "added": 275,
+        "removed": 234
+      }
+    }
+  },
+  "cpu": {
+    "runner": "tests/test_utils/runners/run_megalens_gate.py --profile cpu",
+    "passed": 711,
+    "warnings": 11,
+    "scanner_target_live": 47,
+    "scanner_target_dead": 0,
+    "final_tp_regression_passed": 54
+  },
+  "source_comparisons": {
+    "p2p": {
+      "signature": "identical",
+      "native_body_after_group_inlining": "identical",
+      "batch_and_shape_bodies": "identical"
+    },
+    "pipeline_moved_helpers": 8,
+    "preserved_schedule_functions": 17,
+    "training_pretrain_body": "identical",
+    "training_iteration_envelope": "identical",
+    "tp_moved_builders": 3,
+    "tp_native_functions_after_scope_removal": [
+      "_gather_along_first_dim",
+      "_gather_along_last_dim",
+      "_reduce_scatter_along_first_dim",
+      "_reduce_scatter_along_last_dim"
+    ],
+    "unchanged_files": [
+      "tests/megalens/fixtures/probe_scan_gate.json",
+      "megatron/core/observability.py",
+      "megatron/core/tensor_parallel/observability.py",
+      "megatron/core/transformer/moe/observability.py",
+      "megatron/core/distributed/param_and_grad_buffer.py"
+    ],
+    "paired_marker_files": 30,
+    "marker_pairs": 255
+  },
+  "packaging": {
+    "status": "passed",
+    "python_files": 602,
+    "wheel": "megatron_core-0.18.2-cp312-cp312-linux_x86_64.whl",
+    "sdist": "megatron_core-0.18.2.tar.gz",
+    "sha256": {
+      "megatron_core-0.18.2-cp312-cp312-linux_x86_64.whl": "ad5462464b3303725293d9cc75fc27462d41ee9f3786d9cc52c633369b6d4872",
+      "megatron_core-0.18.2.tar.gz": "f9bd0d00b91a8c7c13bb1920bfe08fe96a7a19495e39566e87c00a452e2becdc"
+    }
+  },
+  "isolated_wheel_import": "passed",
+  "wheel_origin": {
+    "status": "passed",
+    "loaded_modules": 349,
+    "origins_and_installed_bytes_match_wheel": true
+  },
+  "hardware": {
+    "image_id": "sha256:0e9fe710a4eb0850376e336c8ed5bb399da5732c6b7365ff14bc7559dd632bdd",
+    "cuda": "12.8",
+    "nccl": [
+      2,
+      27,
+      5
+    ],
+    "python": "3.12.12",
+    "torch": "2.9.0+cu128",
+    "transformer_engine": "2.9.0+acced6d7",
+    "triton": "3.5.0",
+    "gpus": [
+      "0, NVIDIA H800, 81559 MiB",
+      "1, NVIDIA H800, 81559 MiB",
+      "2, NVIDIA H800, 81559 MiB",
+      "3, NVIDIA H800, 81559 MiB",
+      "4, NVIDIA H800, 81559 MiB",
+      "5, NVIDIA H800, 81559 MiB",
+      "6, NVIDIA H800, 81559 MiB",
+      "7, NVIDIA H800, 81559 MiB"
+    ]
+  },
+  "training": [
+    {
+      "profile": "pp1",
+      "world_size": 1,
+      "status": "passed",
+      "iterations_per_run": 2,
+      "trace_modes": [
+        "off",
+        "on"
+      ],
+      "checkpoint_iteration": 2,
+      "training_arguments_equal": true,
+      "printed_loss_and_grad_norm_equal": true,
+      "baseline_event_counts_and_printed_metrics_equal": true,
+      "trace_shards": {
+        "off": 0,
+        "on": 1
+      },
+      "trace_records": {
+        "off": 0,
+        "on": 132
+      },
+      "audited_python_files_per_worker": 651,
+      "trace_contract": "validate_gpt_pp1_eager_phases",
+      "balanced_iterations_by_rank": {
+        "0": [
+          1,
+          2
+        ]
+      },
+      "metrics": {
+        "1": {
+          "loss": "6.935251E+00",
+          "grad_norm": "1.884"
+        },
+        "2": {
+          "loss": "6.939449E+00",
+          "grad_norm": "1.812"
+        }
+      }
+    },
+    {
+      "profile": "pp2",
+      "world_size": 2,
+      "status": "passed",
+      "iterations_per_run": 2,
+      "trace_modes": [
+        "off",
+        "on"
+      ],
+      "checkpoint_iteration": 2,
+      "training_arguments_equal": true,
+      "printed_loss_and_grad_norm_equal": true,
+      "baseline_event_counts_and_printed_metrics_equal": true,
+      "trace_shards": {
+        "off": 0,
+        "on": 2
+      },
+      "trace_records": {
+        "off": 0,
+        "on": 228
+      },
+      "audited_python_files_per_worker": 651,
+      "trace_contract": "validate_gpt_pp2_training_phases + validate_pp2_batched_route",
+      "balanced_iterations_by_rank": {
+        "0": [
+          1,
+          2
+        ],
+        "1": [
+          1,
+          2
+        ]
+      },
+      "metrics": {
+        "1": {
+          "loss": "6.932657E+00",
+          "grad_norm": "1.848"
+        },
+        "2": {
+          "loss": "6.943624E+00",
+          "grad_norm": "1.912"
+        }
+      }
+    },
+    {
+      "profile": "tp2-pp4",
+      "world_size": 8,
+      "status": "passed",
+      "iterations_per_run": 2,
+      "trace_modes": [
+        "off",
+        "on"
+      ],
+      "checkpoint_iteration": 2,
+      "training_arguments_equal": true,
+      "printed_loss_and_grad_norm_equal": true,
+      "baseline_event_counts_and_printed_metrics_equal": true,
+      "trace_shards": {
+        "off": 0,
+        "on": 8
+      },
+      "trace_records": {
+        "off": 0,
+        "on": 4864
+      },
+      "audited_python_files_per_worker": 651,
+      "trace_contract": "validate_tp2_pp4_multimicrobatch",
+      "balanced_iterations_by_rank": {
+        "0": [
+          1,
+          2
+        ],
+        "1": [
+          1,
+          2
+        ],
+        "2": [
+          1,
+          2
+        ],
+        "3": [
+          1,
+          2
+        ],
+        "4": [
+          1,
+          2
+        ],
+        "5": [
+          1,
+          2
+        ],
+        "6": [
+          1,
+          2
+        ],
+        "7": [
+          1,
+          2
+        ]
+      },
+      "metrics": {
+        "1": {
+          "loss": "6.966334E+00",
+          "grad_norm": "1.316"
+        },
+        "2": {
+          "loss": "6.965911E+00",
+          "grad_norm": "1.378"
+        }
+      }
+    }
+  ],
+  "p2p_order": [
+    {
+      "api_calls": [
+        {
+          "api": "isend",
+          "communicator": "primary",
+          "index": 0,
+          "operation": "send_next",
+          "peer_rank": 1
+        },
+        {
+          "api": "irecv",
+          "communicator": "world",
+          "index": 1,
+          "operation": "recv_next",
+          "peer_rank": 1
+        }
+      ],
+      "backend": "nccl",
+      "communicators": {
+        "alternate": "dist.group.WORLD",
+        "primary": "dist.new_group([0, 1])"
+      },
+      "order_scope": "rank_local_python_api_invocation",
+      "payload_elements": 8,
+      "payload_sum": 1628.0,
+      "primary_group_distinct_from_world": true,
+      "rank": 0,
+      "request_keys": [
+        "send_next",
+        "recv_next"
+      ],
+      "schema_version": "1.0.0",
+      "status": "passed",
+      "target_symbol": "megatron.core.pipeline_parallel.p2p_communication._p2p_ops",
+      "work_identity_preserved": true,
+      "work_types": [
+        "Work",
+        "Work"
+      ],
+      "world_size": 2
+    },
+    {
+      "api_calls": [
+        {
+          "api": "irecv",
+          "communicator": "primary",
+          "index": 0,
+          "operation": "recv_prev",
+          "peer_rank": 0
+        },
+        {
+          "api": "isend",
+          "communicator": "world",
+          "index": 1,
+          "operation": "send_prev",
+          "peer_rank": 0
+        }
+      ],
+      "backend": "nccl",
+      "communicators": {
+        "alternate": "dist.group.WORLD",
+        "primary": "dist.new_group([0, 1])"
+      },
+      "order_scope": "rank_local_python_api_invocation",
+      "payload_elements": 8,
+      "payload_sum": 828.0,
+      "primary_group_distinct_from_world": true,
+      "rank": 1,
+      "request_keys": [
+        "recv_prev",
+        "send_prev"
+      ],
+      "schema_version": "1.0.0",
+      "status": "passed",
+      "target_symbol": "megatron.core.pipeline_parallel.p2p_communication._p2p_ops",
+      "work_identity_preserved": true,
+      "work_types": [
+        "Work",
+        "Work"
+      ],
+      "world_size": 2
+    }
+  ],
+  "limits": [
+    "Native single-node two-step Megatron smoke; formal FlagScale training was not rerun.",
+    "Numerical comparison covers printed loss and gradient norm, not complete tensor equality, convergence or overhead.",
+    "Launch order means rank-local Python API invocation; it does not establish physical NCCL wire ordering or duration.",
+    "CP, EP, CUDA Graph/CUPTI, FSDP, other accelerators, multi-node and long-run paths were not rerun for this refactor."
+  ]
+}
