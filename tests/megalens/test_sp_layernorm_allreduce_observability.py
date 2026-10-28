@@ -12,6 +12,7 @@ import pytest
 import torch
 
 from megatron.core.observability import install_trace_sink, reset_trace_sink
+from megatron.megalens.probes import dp as dp_probes
 
 finalize_grads = importlib.import_module("megatron.core.distributed.finalize_model_grads")
 
@@ -146,14 +147,14 @@ def test_sp_layernorm_scopes_sum_and_average_buckets_with_source_fields(
     )
     collective_calls: list[tuple[torch.Tensor, object, object, tuple[str, ...]]] = []
 
-    monkeypatch.setattr(finalize_grads, "get_pg_size", lambda actual: actual.size())
+    monkeypatch.setattr(dp_probes, "get_pg_size", lambda actual: actual.size())
 
     def peer_ranks(actual):
         assert actual is group
         sink.events.append(("peer-query", tuple(sink.active)))
         return [1, 3]
 
-    monkeypatch.setattr(finalize_grads, "get_process_group_peer_ranks", peer_ranks)
+    monkeypatch.setattr(dp_probes, "get_process_group_peer_ranks", peer_ranks)
 
     def all_reduce(tensor, *, op=None, group=None):
         collective_calls.append((tensor.clone(), op, group, tuple(sink.active)))
@@ -219,12 +220,12 @@ def test_sp_layernorm_closed_gate_preserves_collectives_and_skips_metadata(
     calls: list[tuple[object, object]] = []
 
     monkeypatch.setattr(
-        finalize_grads,
+        dp_probes,
         "get_pg_size",
         lambda group: pytest.fail("closed gate queried group size metadata"),
     )
     monkeypatch.setattr(
-        finalize_grads,
+        dp_probes,
         "get_process_group_peer_ranks",
         lambda group: pytest.fail("closed gate queried group peers"),
     )
@@ -257,9 +258,9 @@ def test_sp_layernorm_collective_error_closes_scope_and_preserves_exception(
     model = _Model([("layernorm.weight", param)])
     error = RuntimeError("collective failed")
 
-    monkeypatch.setattr(finalize_grads, "get_pg_size", lambda actual: actual.size())
+    monkeypatch.setattr(dp_probes, "get_pg_size", lambda actual: actual.size())
     monkeypatch.setattr(
-        finalize_grads,
+        dp_probes,
         "get_process_group_peer_ranks",
         lambda group: pytest.fail("failed collective queried group peers"),
     )
@@ -305,8 +306,8 @@ def test_sp_layernorm_prefers_main_grad_and_skips_present_none_main_grad(
         ]
     )
 
-    monkeypatch.setattr(finalize_grads, "get_pg_size", lambda actual: actual.size())
-    monkeypatch.setattr(finalize_grads, "get_process_group_peer_ranks", lambda actual: [1])
+    monkeypatch.setattr(dp_probes, "get_pg_size", lambda actual: actual.size())
+    monkeypatch.setattr(dp_probes, "get_process_group_peer_ranks", lambda actual: [1])
 
     def all_reduce(tensor, *, op=None, group=None):
         assert op == torch.distributed.ReduceOp.SUM
@@ -333,8 +334,8 @@ def test_sp_layernorm_unavailable_peer_metadata_does_not_change_collective(
     model = _Model([("layernorm.weight", param)])
     calls: list[tuple[object, object]] = []
 
-    monkeypatch.setattr(finalize_grads, "get_pg_size", lambda actual: actual.size())
-    monkeypatch.setattr(finalize_grads, "get_process_group_peer_ranks", lambda actual: None)
+    monkeypatch.setattr(dp_probes, "get_pg_size", lambda actual: actual.size())
+    monkeypatch.setattr(dp_probes, "get_process_group_peer_ranks", lambda actual: None)
 
     def all_reduce(tensor, *, op=None, group=None):
         calls.append((op, group))
@@ -420,8 +421,8 @@ def test_sp_layernorm_scope_is_sibling_of_all_grads_parent(monkeypatch: pytest.M
 
         monkeypatch.setattr(finalize_grads, helper_name, record_helper)
 
-    monkeypatch.setattr(finalize_grads, "get_pg_size", lambda actual: actual.size())
-    monkeypatch.setattr(finalize_grads, "get_process_group_peer_ranks", lambda actual: [1])
+    monkeypatch.setattr(dp_probes, "get_pg_size", lambda actual: actual.size())
+    monkeypatch.setattr(dp_probes, "get_process_group_peer_ranks", lambda actual: [1])
 
     def all_reduce(tensor, *, op=None, group=None):
         sink.events.append(("collective", op, tuple(sink.active)))
@@ -474,7 +475,9 @@ def test_sp_layernorm_producer_is_dependency_light_and_narrow() -> None:
     tree = ast.parse(source)
 
     assert "megatron.training" not in source
-    assert "megatron.megalens" not in source
+    assert "megatron.megalens.probes" in source
+    assert "megatron.megalens.tracer" not in source
+    assert "megatron.megalens.runtime" not in source
 
     functions = {
         node.name: node
@@ -486,18 +489,11 @@ def test_sp_layernorm_producer_is_dependency_light_and_narrow() -> None:
         node
         for node in ast.walk(reducer)
         if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "_all_reduce_with_trace"
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "gradient_all_reduce_scope"
     ]
     assert len(producer_calls) == 1
-    assert isinstance(producer_calls[0].args[2], ast.Constant)
-    assert producer_calls[0].args[2].value == "sp-layernorm-allreduce"
+    assert isinstance(producer_calls[0].args[0], ast.Constant)
+    assert producer_calls[0].args[0].value == "sp-layernorm-allreduce"
 
-    helper = functions["_all_reduce_with_trace"]
-    helper_names = {
-        node.func.id
-        for node in ast.walk(helper)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-    }
-    assert {"prepare_trace_scope", "open_trace_scope"} <= helper_names
-    assert "trace_scope" not in helper_names
+    assert "_all_reduce_with_trace" not in functions

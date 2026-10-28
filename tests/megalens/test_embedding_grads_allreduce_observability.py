@@ -12,6 +12,7 @@ import pytest
 import torch
 
 from megatron.core.observability import install_trace_sink, reset_trace_sink
+from megatron.megalens.probes import dp as dp_probes
 
 finalize_grads = importlib.import_module("megatron.core.distributed.finalize_model_grads")
 
@@ -149,8 +150,9 @@ def _install_embedding_runtime(
         return group.size()
 
     monkeypatch.setattr(finalize_grads, "get_pg_size", group_size)
+    monkeypatch.setattr(dp_probes, "get_pg_size", group_size)
     monkeypatch.setattr(
-        finalize_grads,
+        dp_probes,
         "get_process_group_peer_ranks",
         lambda group: [peer for peer in group.peers if peer != rank],
     )
@@ -356,7 +358,10 @@ def test_single_group_closed_gate_preserves_collective_and_skips_trace_metadata(
 
     monkeypatch.setattr(finalize_grads, "get_pg_size", group_size)
     monkeypatch.setattr(
-        finalize_grads,
+        dp_probes, "get_pg_size", lambda group: pytest.fail("closed gate queried size")
+    )
+    monkeypatch.setattr(
+        dp_probes,
         "get_process_group_peer_ranks",
         lambda actual: pytest.fail("closed trace gate queried group peers"),
     )
@@ -514,7 +519,7 @@ def test_flags_scale_group_list_closed_gate_preserves_multi_collective_behavior(
 
     monkeypatch.setattr(finalize_grads, "get_pg_size", group_size)
     monkeypatch.setattr(
-        finalize_grads,
+        dp_probes,
         "get_process_group_peer_ranks",
         lambda group: pytest.fail("closed list trace gate queried group peers"),
     )
@@ -559,7 +564,7 @@ def test_embedding_collective_error_closes_scope_and_stops_list_postprocessing(
     calls = 0
 
     monkeypatch.setattr(
-        finalize_grads,
+        dp_probes,
         "get_process_group_peer_ranks",
         lambda group: pytest.fail("failed collective queried group peers"),
     )
@@ -607,7 +612,7 @@ def test_conditional_collective_error_skips_unflatten_and_preserves_exception(
     error = RuntimeError("conditional collective failed")
 
     monkeypatch.setattr(
-        finalize_grads,
+        dp_probes,
         "get_process_group_peer_ranks",
         lambda group: pytest.fail("failed collective queried group peers"),
     )
@@ -693,7 +698,9 @@ def test_embedding_producers_are_dependency_light_and_route_all_target_collectiv
     tree = ast.parse(source)
 
     assert "megatron.training" not in source
-    assert "megatron.megalens" not in source
+    assert "megatron.megalens.probes" in source
+    assert "megatron.megalens.tracer" not in source
+    assert "megatron.megalens.runtime" not in source
 
     functions = {
         node.name: node
@@ -707,8 +714,8 @@ def test_embedding_producers_are_dependency_light_and_route_all_target_collectiv
             node
             for node in ast.walk(function)
             if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "_all_reduce_with_trace"
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "gradient_all_reduce_scope"
         ]
         raw_calls = [
             node
@@ -718,19 +725,12 @@ def test_embedding_producers_are_dependency_light_and_route_all_target_collectiv
             and node.func.attr == "all_reduce"
         ]
         assert len(trace_calls) == expected_count
-        assert raw_calls == []
+        assert len(raw_calls) == expected_count
         assert all(
             len(call.args) >= 3
-            and isinstance(call.args[2], ast.Constant)
-            and call.args[2].value == "embedding-grads-allreduce"
+            and isinstance(call.args[0], ast.Constant)
+            and call.args[0].value == "embedding-grads-allreduce"
             for call in trace_calls
         )
 
-    helper = functions["_all_reduce_with_trace"]
-    helper_names = {
-        node.func.id
-        for node in ast.walk(helper)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-    }
-    assert {"prepare_trace_scope", "open_trace_scope"} <= helper_names
-    assert "trace_scope" not in helper_names
+    assert "_all_reduce_with_trace" not in functions

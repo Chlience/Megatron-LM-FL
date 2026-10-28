@@ -99,6 +99,23 @@ def test_current_target_matches_reviewed_fixture() -> None:
     assert result.errors == ()
 
 
+@pytest.mark.parametrize(
+    "name,event",
+    [
+        ("gradient_all_reduce_scope", "embedding-grads-allreduce"),
+        ("gradient_all_reduce_scope", "sp-layernorm-allreduce"),
+    ],
+)
+def test_scanner_recognizes_probe_owned_collective_scopes(tmp_path, name, event) -> None:
+    package = tmp_path / "megatron"
+    package.mkdir()
+    (package / "sample.py").write_text(
+        f"with probes.{name}({event!r}, tensor, group):\n    pass\n", encoding="utf-8"
+    )
+
+    assert gate.scan_repo(tmp_path)["producers"] == {"live": [event], "dead": []}
+
+
 def test_fixture_contains_only_reviewable_probe_facts(tmp_path: Path) -> None:
     source_repo = tmp_path / "source"
     target_repo = tmp_path / "target"

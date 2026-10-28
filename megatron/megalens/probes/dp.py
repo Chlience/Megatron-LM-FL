@@ -3,17 +3,52 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from itertools import count
-from typing import TYPE_CHECKING, Any, ContextManager, List
+from typing import TYPE_CHECKING, Any, ContextManager, Iterator, List
 
-from megatron.core.observability import open_trace_scope, prepare_trace_scope
-from megatron.core.utils import get_process_group_peer_ranks
+import torch
+
+from megatron.core.observability import TraceScope, open_trace_scope, prepare_trace_scope
+from megatron.core.utils import get_pg_size, get_process_group_peer_ranks
 
 if TYPE_CHECKING:
     from megatron.core.distributed.param_and_grad_buffer import _ParamAndGradBucket
 
 # BEGIN MEGALENS OBSERVABILITY
 _DP_OPERATION_SEQUENCE = count(1)
+
+
+@contextmanager
+def _gradient_all_reduce_scope(manager: TraceScope, group: Any) -> Iterator[None]:
+    with manager as scope:
+        yield
+        scope.set("group", get_process_group_peer_ranks(group))
+
+
+def gradient_all_reduce_scope(
+    name: str,
+    tensor: torch.Tensor,
+    group: Any,
+    *,
+    op: Any = None,
+    embedding_kind: str | None = None,
+) -> ContextManager[Any]:
+    """Observe one native gradient reduction and fill peers only after success."""
+    gate = prepare_trace_scope(name)
+    if gate is None:
+        return open_trace_scope(gate, name)
+    ctx = {
+        "data_bytes": int(tensor.numel() * tensor.element_size()),
+        "group_size": get_pg_size(group),
+    }
+    if op is not None:
+        ctx["reduce_op"] = getattr(op, "name", str(op).split(".")[-1])
+        ctx["grad_bucket"] = "sum" if op == torch.distributed.ReduceOp.SUM else "avg"
+    if name == "embedding-grads-allreduce":
+        ctx["embedding_kind"] = embedding_kind
+    manager = open_trace_scope(gate, name, ctx=ctx, slots=("group",))
+    return _gradient_all_reduce_scope(manager, group)
 
 
 def _next_dp_operation_id(kind: str) -> str:

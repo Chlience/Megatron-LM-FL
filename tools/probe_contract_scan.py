@@ -29,6 +29,7 @@ PROBE_METHODS = {
     "all_reduce_scope",
     "all_gather_scope",
     "reduce_scatter_scope",
+    "gradient_all_reduce_scope",
 }
 PROBE_NAME_POSITIONS = {"open_trace_scope": 1}
 PROBE_DECORATORS = {"scoped_forward"}

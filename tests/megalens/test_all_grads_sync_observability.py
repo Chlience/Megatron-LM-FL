@@ -399,7 +399,9 @@ def test_all_grads_source_scope_is_literal_dependency_light_and_narrow() -> None
     ]
 
     assert "megatron.training" not in source
-    assert "megatron.megalens" not in source
+    assert "megatron.megalens.probes" in source
+    assert "megatron.megalens.tracer" not in source
+    assert "megatron.megalens.runtime" not in source
     assert len(scopes) == 1
     scope_call = scopes[0].items[0].context_expr
     assert len(scope_call.args) == 1
