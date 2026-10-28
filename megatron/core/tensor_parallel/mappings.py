@@ -36,10 +36,11 @@ def _reduce(input_, group):
     # BEGIN MEGALENS OBSERVABILITY
     group_size = int(group.size())
     with tp_probes.all_reduce_scope("tp-allreduce", input_, group, group_size):
-        # Preserve the source no-op scope while bypassing the collective for one rank.
+        # Bypass the function if we are using only 1 GPU.
         if group_size == 1:
             return input_
 
+        # All-reduce.
         torch.distributed.all_reduce(input_.contiguous(), group=group)
     # END MEGALENS OBSERVABILITY
 
@@ -101,9 +102,7 @@ def _gather_along_last_dim(input_, group):
     dim_size = list(input_.size())
     dim_size[0] = dim_size[0] * world_size
 
-    output = torch.empty(
-        dim_size, dtype=input_.dtype, device=cur_platform.current_device()
-    )  # FlagScale Modify
+    output = torch.empty(dim_size, dtype=input_.dtype, device=cur_platform.current_device())  # FlagScale Modify
     # BEGIN MEGALENS OBSERVABILITY
     with tp_probes.all_gather_scope("tp-all-gather-last", input_, group, world_size, "last"):
         dist_all_gather_func(output, input_.contiguous(), group=group)
@@ -161,9 +160,7 @@ def _gather_along_first_dim(input_, group, output_split_sizes=None, use_global_b
         if use_global_buffer:
             output = get_global_memory_buffer().get_tensor(dim_size, input_.dtype, "mpu")
         else:
-            output = torch.empty(
-                dim_size, dtype=input_.dtype, device=cur_platform.current_device()
-            )  # FlagScale Modify
+            output = torch.empty(dim_size, dtype=input_.dtype, device=cur_platform.current_device())  # FlagScale Modify
         # BEGIN MEGALENS OBSERVABILITY
         with tp_probes.all_gather_scope("tp-all-gather-first", input_, group, world_size, "first"):
             dist_all_gather_func(output, input_.contiguous(), group=group)
@@ -173,9 +170,7 @@ def _gather_along_first_dim(input_, group, output_split_sizes=None, use_global_b
         if use_global_buffer:
             output = get_global_memory_buffer().get_tensor(dim_size, input_.dtype, "mpu")
         else:
-            output = torch.empty(
-                dim_size, dtype=input_.dtype, device=cur_platform.current_device()
-            )  # FlagScale Modify
+            output = torch.empty(dim_size, dtype=input_.dtype, device=cur_platform.current_device())  # FlagScale Modify
         output_tensor_list = list(torch.split(output, output_split_sizes, dim=0))
         # BEGIN MEGALENS OBSERVABILITY
         with tp_probes.all_gather_scope(
@@ -213,9 +208,7 @@ def _reduce_scatter_along_first_dim(input_, group, input_split_sizes=None, use_g
         if use_global_buffer:
             output = get_global_memory_buffer().get_tensor(dim_size, input_.dtype, "mpu")
         else:
-            output = torch.empty(
-                dim_size, dtype=input_.dtype, device=cur_platform.current_device()
-            )  # FlagScale Modify
+            output = torch.empty(dim_size, dtype=input_.dtype, device=cur_platform.current_device())  # FlagScale Modify
         # BEGIN MEGALENS OBSERVABILITY
         with tp_probes.reduce_scatter_scope(
             "tp-reduce-scatter", input_, group, world_size, "first"

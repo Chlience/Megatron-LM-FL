@@ -149,14 +149,6 @@ from megatron.core.models.gpt.experimental_attention_variant_module_specs import
 from megatron.plugin.platform.platform_manager import get_platform
 
 cur_platform = get_platform()
-from megatron.core.distributed import DistributedDataParallel as DDP
-from megatron.core.distributed import (
-    DistributedDataParallelConfig,
-    TorchFullyShardedDataParallelConfig,
-)
-from megatron.core.distributed.fsdp.mcore_fsdp_adapter import (
-    FullyShardedDataParallel as megatron_FSDP,
-)
 
 # BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.observability import trace_scope
@@ -177,6 +169,12 @@ from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.transformer.cuda_graphs import TECudaGraphHelper
 from megatron.core.transformer.module import Float16Module
 from megatron.core.transformer.moe.paged_stash import PagedStashRunner
+from megatron.core.distributed import DistributedDataParallelConfig, TorchFullyShardedDataParallelConfig
+from megatron.core.distributed import DistributedDataParallel as DDP
+from megatron.core.distributed.fsdp.mcore_fsdp_adapter import FullyShardedDataParallel as megatron_FSDP
+from megatron.core.optimizer.optimizer import param_group_identifier_keys
+
+from megatron.core.optimizer.qk_clip import clip_qk
 from megatron.core.utils import (
     StragglerDetector,
     check_param_hashes_across_dp_replicas,
@@ -265,20 +263,20 @@ from .activation_logging import (
 from .async_utils import maybe_finalize_async_save
 from .dgrad_logging import disable_dgrad_logging, enable_dgrad_logging, save_dgrads
 
-# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from .global_vars import (
     destroy_global_vars,
     get_args,
     get_energy_monitor,
-    get_megalens_runtime,
     get_one_logger,
     get_signal_handler,
     get_tensorboard_writer,
     get_timers,
     get_tokenizer,
     get_wandb_writer,
-    shutdown_megalens_runtime,
 )
+
+# BEGIN MEGALENS OBSERVABILITY  # isort: split
+from .global_vars import get_megalens_runtime, shutdown_megalens_runtime
 
 # END MEGALENS OBSERVABILITY  # isort: split
 from .utils import (
@@ -2866,11 +2864,11 @@ def save_checkpoint_and_time(
         train_data_iterator=train_data_iterator,
         preprocess_common_state_dict_fn=preprocess_common_state_dict,
     )
-
+    
     # Stop timer and compute time elapsed to save checkpoint. Stop timer before timers.log() call as it resets the timer.
     timers(timer_key).stop(barrier=True)
     save_checkpoint_duration = timers(timer_key).elapsed(reset=False)
-
+    
     if should_report_memory:
         # Track memory after checkpoint save.
         report_memory(f"(after save_checkpoint for iteration {iteration})")

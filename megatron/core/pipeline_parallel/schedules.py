@@ -810,9 +810,7 @@ def forward_backward_no_pipelining(
 
     forward_data_store = []
     input_tensor, output_tensor_grad = None, None
-    total_num_tokens = torch.zeros(
-        [], dtype=torch.int, device=cur_platform.device_name()
-    )  # FlagScale Modify
+    total_num_tokens = torch.zeros([], dtype=torch.int, device=cur_platform.device_name())  # FlagScale Modify
 
     if config.overlap_moe_expert_parallel_comm and not forward_only:
         forward_data_store, total_num_tokens = combined_1f1b_schedule_for_no_pipelining(
@@ -1253,9 +1251,7 @@ def forward_backward_pipelining_with_interleaving(
     )
     workload_tp_group_size = tp_group.size() if record_pipeline_workload else 1
     # END MEGALENS OBSERVABILITY
-    total_num_tokens = torch.zeros(
-        [], dtype=torch.int, device=cur_platform.device_name()
-    )  # FlagScale Modify
+    total_num_tokens = torch.zeros([], dtype=torch.int, device=cur_platform.device_name())  # FlagScale Modify
 
     forward_data_store = []
     output_tensor_grads = None
@@ -2524,9 +2520,7 @@ def forward_backward_pipelining_without_interleaving(
     )
     workload_tp_group_size = tp_group.size() if not is_multimodule else 1
     # END MEGALENS OBSERVABILITY
-    total_num_tokens = torch.zeros(
-        [], dtype=torch.int, device=cur_platform.device_name()
-    )  # FlagScale Modify
+    total_num_tokens = torch.zeros([], dtype=torch.int, device=cur_platform.device_name())  # FlagScale Modify
 
     if not forward_only:
         input_tensors = []

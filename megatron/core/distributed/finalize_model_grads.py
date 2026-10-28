@@ -45,16 +45,12 @@ except ImportError:
 from .. import parallel_state
 from ..transformer.moe.moe_utils import get_updated_expert_bias
 from ..transformer.transformer_config import TransformerConfig
-
-# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from ..utils import (
     get_attr_wrapped_model,
     get_model_config,
     get_pg_size,
     get_tensor_model_parallel_group_if_none,
 )
-
-# END MEGALENS OBSERVABILITY  # isort: split
 
 
 def _get_main_grad_attr(param: torch.nn.Parameter):

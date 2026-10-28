@@ -23,11 +23,7 @@ from megatron.megalens.probes import dp as dp_probes
 # END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.rerun_state_machine import get_rerun_state_machine
-
-# BEGIN MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.utils import log_single_rank
-
-# END MEGALENS OBSERVABILITY  # isort: split
 
 from ..fp4_utils import get_nvfp4_rowwise_packed_shape, is_nvfp4tensor
 from ..fp8_utils import (
@@ -42,7 +38,6 @@ from .distributed_data_parallel_config import DistributedDataParallelConfig
 from .reduce_scatter_with_fp32_accumulation import reduce_scatter_with_fp32_accumulation
 
 logger = logging.getLogger(__name__)
-
 
 try:
     if is_torch_min_version("1.13.0"):
@@ -699,7 +694,9 @@ class _ParamAndGradBucketGroup:
         # BEGIN MEGALENS OBSERVABILITY
         grad_trace_operations = []
         grad_sync_scope = dp_probes.grad_sync_scope(
-            self, async_op=async_op, force_all_reduce=force_all_reduce,
+            self,
+            async_op=async_op,
+            force_all_reduce=force_all_reduce,
             operations=grad_trace_operations,
         )
 
@@ -829,9 +826,7 @@ class _ParamAndGradBucketGroup:
         # communications on a separate communication stream.
         if self.ddp_config.num_distributed_optimizer_instances > 1:
             # BEGIN MEGALENS OBSERVABILITY
-            dp_probes.join_grad_sync(
-                self, cur_platform, force_all_reduce=bool(force_all_reduce)
-            )
+            dp_probes.join_grad_sync(self, cur_platform, force_all_reduce=bool(force_all_reduce))
             # END MEGALENS OBSERVABILITY
             self._copy_back_extra_main_grads()
             self.grad_reduce_finished = True

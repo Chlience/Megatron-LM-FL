@@ -1,4 +1,6 @@
 # Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+
 from functools import partial  # FlagScale Modify
 
 # BEGIN MEGALENS OBSERVABILITY  # isort: split
@@ -17,7 +19,6 @@ from megatron.megalens.probes.p2p import wait_p2p_request
 
 # END MEGALENS OBSERVABILITY  # isort: split
 from megatron.core.pipeline_parallel.utils import is_pp_first_stage, is_pp_last_stage
-
 ######## FlagScale Begin ########
 from megatron.core.utils import get_pg_rank, get_pg_size, nvtx_decorator
 from megatron.plugin.hetero.p2p_communication import (
@@ -28,7 +29,6 @@ from megatron.plugin.hetero.p2p_communication import (
     send_forward_hetero,
     send_forward_recv_backward_hetero,
 )
-
 ######## FlagScale End ########
 
 # Types
@@ -77,29 +77,6 @@ def _batched_p2p_ops(
     else:
         reqs = []
     return reqs
-
-
-# BEGIN MEGALENS OBSERVABILITY
-def _p2p_groups(
-    group: torch.distributed.ProcessGroup,
-) -> tuple[torch.distributed.ProcessGroup, torch.distributed.ProcessGroup]:
-    """Share native group selection with observation without changing launch order."""
-    even_send_odd_recv_group = group
-    if group.size() == 2 and torch.distributed.get_backend(group) != 'ucc':
-        # Use the global process group for one of the two p2p communications
-        # to allow the overlap of the independent communications.
-        # Using the global process group is compatible because the pipeline-parallel
-        # communications set the source and destination by global rank.
-        # The only exception occurs when using the ‘ucc’ backend.
-        # Because the global communicator always uses the ‘nccl’ backend,
-        # we must ensure the else path is followed for the ‘ucc’ backend.
-        even_recv_odd_send_group = torch.distributed.group.WORLD
-    else:
-        even_recv_odd_send_group = group
-    return even_send_odd_recv_group, even_recv_odd_send_group
-
-
-# END MEGALENS OBSERVABILITY
 
 
 def _p2p_ops(
@@ -167,6 +144,29 @@ def _p2p_ops(
             )
             reqs["send_prev"] = send_prev_req
     return reqs
+
+
+# BEGIN MEGALENS OBSERVABILITY
+def _p2p_groups(
+    group: torch.distributed.ProcessGroup,
+) -> tuple[torch.distributed.ProcessGroup, torch.distributed.ProcessGroup]:
+    """Share native group selection with observation without changing launch order."""
+    even_send_odd_recv_group = group
+    if group.size() == 2 and torch.distributed.get_backend(group) != 'ucc':
+        # Use the global process group for one of the two p2p communications
+        # to allow the overlap of the independent communications.
+        # Using the global process group is compatible because the pipeline-parallel
+        # communications set the source and destination by global rank.
+        # The only exception occurs when using the ‘ucc’ backend.
+        # Because the global communicator always uses the ‘nccl’ backend,
+        # we must ensure the else path is followed for the ‘ucc’ backend.
+        even_recv_odd_send_group = torch.distributed.group.WORLD
+    else:
+        even_recv_odd_send_group = group
+    return even_send_odd_recv_group, even_recv_odd_send_group
+
+
+# END MEGALENS OBSERVABILITY
 
 
 def is_single_shape(x) -> bool:
@@ -269,15 +269,11 @@ class P2PCommunicator:
             )
         if tensor_send_prev is not None:
             send_prev_shape_tensor = torch.tensor(
-                tensor_send_prev.size(),
-                device=cur_platform.current_device(),
-                dtype=torch.int64,  # FlagScale Modify
+                tensor_send_prev.size(), device=cur_platform.current_device(), dtype=torch.int64  # FlagScale Modify
             )
         if tensor_send_next is not None:
             send_next_shape_tensor = torch.tensor(
-                tensor_send_next.size(),
-                device=cur_platform.current_device(),
-                dtype=torch.int64,  # FlagScale Modify
+                tensor_send_next.size(), device=cur_platform.current_device(), dtype=torch.int64  # FlagScale Modify
             )
 
         if config.use_ring_exchange_p2p:

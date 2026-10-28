@@ -15,18 +15,14 @@ from megatron.core.pipeline_parallel.fine_grained_activation_offload import (
 )
 from megatron.core.pipeline_parallel.utils import ScheduleNode, make_viewless
 from megatron.core.transformer.enums import CudaGraphModule
-from megatron.core.transformer.hyper_connection import learned_output_contract
 from megatron.core.transformer.module import GraphableMegatronModule, float16_to_fp32
 from megatron.core.transformer.moe.moe_layer import MoELayer
 from megatron.core.transformer.multi_token_prediction import (
     MultiTokenPredictionLayer,
     get_mtp_layer_offset,
 )
-from megatron.core.transformer.transformer_layer import (
-    HyperConnectionTransformerLayer,
-    TransformerLayer,
-    make_viewless_tensor,
-)
+from megatron.core.transformer.transformer_layer import TransformerLayer, make_viewless_tensor, HyperConnectionTransformerLayer
+from megatron.core.transformer.hyper_connection import learned_output_contract
 from megatron.core.typed_torch import apply_module, copy_signature
 from megatron.core.utils import internal_api, nvtx_range_pop, nvtx_range_push
 
@@ -566,7 +562,7 @@ def build_transformer_layer_callables(layer: TransformerLayer | HyperConnectionT
                 # BEGIN MEGALENS OBSERVABILITY
                 nonlocal dispatch_fields
                 # END MEGALENS OBSERVABILITY
-                ##### FlagScale Begin ######
+                ######## FlagScale Begin ########
                 fwd_attn_kwargs = {
                     "hidden_states": hidden_states,
                     "attention_mask": attention_mask,
@@ -664,7 +660,7 @@ def build_transformer_layer_callables(layer: TransformerLayer | HyperConnectionT
         node.layer_state.moe_dispatch_fields = dispatch_fields
         # END MEGALENS OBSERVABILITY
 
-        ##### FlagScale Begin #####
+        ######## FlagScale Begin ########
         # Detach here for mlp_bda residual connection. If enable_mhc, residual is saved before mlp_hyper_connection.
         if not enable_mhc:
             node.layer_state.residual = node.detach(hidden_states)

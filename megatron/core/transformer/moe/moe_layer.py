@@ -489,23 +489,6 @@ class MoELayer(BaseMoELayer):
         return probs, routing_map
     ######## FlagScale End ########
 
-    # BEGIN MEGALENS OBSERVABILITY
-    def _route_for_dispatch(
-        self,
-        hidden_states: torch.Tensor,
-        padding_mask: Optional[torch.Tensor] = None,
-        input_ids: Optional[torch.Tensor] = None,
-    ):
-        """Route once and capture fields for the matching eager dispatch."""
-        if not trace_is_enabled("moe-dispatch"):
-            probs, routing_map = self.route(hidden_states, padding_mask, input_ids)
-            return probs, routing_map, None
-
-        with capture_dispatch_fields() as collector:
-            probs, routing_map = self.route(hidden_states, padding_mask, input_ids)
-        return probs, routing_map, collector.fields()
-    # END MEGALENS OBSERVABILITY
-
     @maybe_skip_or_early_return_by_cudagraph("preprocess")
     def preprocess(
         self, hidden_states: torch.Tensor, probs: torch.Tensor, routing_map: torch.Tensor
@@ -561,20 +544,6 @@ class MoELayer(BaseMoELayer):
         with moe_probes.dispatch_scope(self, hidden_states):
             return self.token_dispatcher.token_dispatch(hidden_states, probs)
         # END MEGALENS OBSERVABILITY
-
-    # BEGIN MEGALENS OBSERVABILITY
-    def _dispatch_with_fields(
-        self,
-        hidden_states: torch.Tensor,
-        probs: torch.Tensor,
-        fields: Mapping[str, Any] | None,
-    ):
-        """Dispatch with router evidence captured for this invocation."""
-        if fields is None:
-            return self.dispatch(hidden_states, probs)
-        with bind_dispatch_fields(fields):
-            return self.dispatch(hidden_states, probs)
-    # END MEGALENS OBSERVABILITY
 
     @maybe_skip_or_early_return_by_cudagraph("shared_experts_compute")
     def shared_experts_compute(self, hidden_states: torch.Tensor):
@@ -639,16 +608,6 @@ class MoELayer(BaseMoELayer):
 
         return output, mlp_bias
 
-    # BEGIN MEGALENS OBSERVABILITY
-    def _combine_with_scope(self, output: torch.Tensor, *, include_postprocess: bool):
-        """Use the full source boundary for sequential calls and a short split-call boundary."""
-        with moe_probes.combine_scope(self, output):
-            output = self.token_dispatcher.token_combine(output)
-            if include_postprocess:
-                output = self.token_dispatcher.combine_postprocess(output)
-        return output
-    # END MEGALENS OBSERVABILITY
-
     def combine(self, output: torch.Tensor):
         """Combines expert outputs via communication and adds shared expert output.
 
@@ -659,38 +618,13 @@ class MoELayer(BaseMoELayer):
         return self._combine_with_scope(output, include_postprocess=False)
         # END MEGALENS OBSERVABILITY
 
-    # BEGIN MEGALENS OBSERVABILITY
-    def _finish_postprocess(
-        self, output: torch.Tensor, shared_expert_output: Optional[torch.Tensor]
-    ):
-        """Apply target-only post-combine computation outside the source scope."""
-        if self.config.moe_latent_size:
-            output, _ = self.fc2_latent_proj(output)
-
-        if shared_expert_output is not None:
-            output = output + shared_expert_output
-        elif (
-            isinstance(self.token_dispatcher, NVLSAllGatherVDispatcher)
-            and self._latent_shared_expert_output is not None
-        ):
-            # This codepath is for inference-only shared-expert overlap of latent MoEs.
-            # Must happen post-fc2_latent_proj so dimensions match.
-            torch.cuda.current_stream().wait_stream(SharedExpertMLP.stream)
-            output = output + self._latent_shared_expert_output
-            self._latent_shared_expert_output = None
-        return output
-
-    def _combine_and_postprocess(
-        self, output: torch.Tensor, shared_expert_output: Optional[torch.Tensor]
-    ):
-        """Restore the source combine boundary for sequential target call paths."""
-        output = self._combine_with_scope(output, include_postprocess=True)
-        return self._finish_postprocess(output, shared_expert_output)
-    # END MEGALENS OBSERVABILITY
-
     def postprocess(self, output: torch.Tensor, shared_expert_output: Optional[torch.Tensor]):
         """Project the output back from latent dimension to hidden dimension after combine
-        in latent dimension if needed. Combine expert output with shared_experts if needed."""
+        in latent dimension if needed. Combine expert output with shared_experts if needed.
+
+        _latent_shared_expert_output is inference-only (latent-MoE + NVLS dispatcher with
+        shared-expert overlap). It is populated in preprocess and joined here, after
+        fc2_latent_proj, so the dimensions match the full hidden dim."""
 
         output = self.token_dispatcher.combine_postprocess(output)
         # BEGIN MEGALENS OBSERVABILITY
@@ -771,6 +705,7 @@ class MoELayer(BaseMoELayer):
                         hidden_states, padding_mask, input_ids
                     )
                     # END MEGALENS OBSERVABILITY
+                    ######## FlagScale End ########
                     hidden_states, probs = self.preprocess(hidden_states, probs, routing_map)
 
                     if intermediate_tensors is not None:
@@ -872,6 +807,77 @@ class MoELayer(BaseMoELayer):
             from megatron.core.extensions.transformer_engine import set_save_original_input
 
             set_save_original_input(self.shared_experts.linear_fc1)
+
+    # BEGIN MEGALENS OBSERVABILITY
+    def _route_for_dispatch(
+        self,
+        hidden_states: torch.Tensor,
+        padding_mask: Optional[torch.Tensor] = None,
+        input_ids: Optional[torch.Tensor] = None,
+    ):
+        """Route once and capture fields for the matching eager dispatch."""
+        if not trace_is_enabled("moe-dispatch"):
+            probs, routing_map = self.route(hidden_states, padding_mask, input_ids)
+            return probs, routing_map, None
+
+        with capture_dispatch_fields() as collector:
+            probs, routing_map = self.route(hidden_states, padding_mask, input_ids)
+        return probs, routing_map, collector.fields()
+
+    # END MEGALENS OBSERVABILITY
+
+    # BEGIN MEGALENS OBSERVABILITY
+    def _dispatch_with_fields(
+        self, hidden_states: torch.Tensor, probs: torch.Tensor, fields: Mapping[str, Any] | None
+    ):
+        """Dispatch with router evidence captured for this invocation."""
+        if fields is None:
+            return self.dispatch(hidden_states, probs)
+        with bind_dispatch_fields(fields):
+            return self.dispatch(hidden_states, probs)
+
+    # END MEGALENS OBSERVABILITY
+
+    # BEGIN MEGALENS OBSERVABILITY
+    def _combine_with_scope(self, output: torch.Tensor, *, include_postprocess: bool):
+        """Use the full source boundary for sequential calls and a short split-call boundary."""
+        with moe_probes.combine_scope(self, output):
+            output = self.token_dispatcher.token_combine(output)
+            if include_postprocess:
+                output = self.token_dispatcher.combine_postprocess(output)
+        return output
+
+    # END MEGALENS OBSERVABILITY
+
+    # BEGIN MEGALENS OBSERVABILITY
+    def _finish_postprocess(
+        self, output: torch.Tensor, shared_expert_output: Optional[torch.Tensor]
+    ):
+        """Apply target-only post-combine computation outside the source scope."""
+        if self.config.moe_latent_size:
+            output, _ = self.fc2_latent_proj(output)
+
+        if shared_expert_output is not None:
+            output = output + shared_expert_output
+        elif (
+            isinstance(self.token_dispatcher, NVLSAllGatherVDispatcher)
+            and self._latent_shared_expert_output is not None
+        ):
+            # This codepath is for inference-only shared-expert overlap of latent MoEs.
+            # Must happen post-fc2_latent_proj so dimensions match.
+            torch.cuda.current_stream().wait_stream(SharedExpertMLP.stream)
+            output = output + self._latent_shared_expert_output
+            self._latent_shared_expert_output = None
+        return output
+
+    def _combine_and_postprocess(
+        self, output: torch.Tensor, shared_expert_output: Optional[torch.Tensor]
+    ):
+        """Restore the source combine boundary for sequential target call paths."""
+        output = self._combine_with_scope(output, include_postprocess=True)
+        return self._finish_postprocess(output, shared_expert_output)
+
+    # END MEGALENS OBSERVABILITY
 
 
 # BEGIN MEGALENS OBSERVABILITY
