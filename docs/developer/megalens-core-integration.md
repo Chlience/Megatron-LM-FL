@@ -5,6 +5,14 @@ the native computation, collective launches, waits and scheduling decisions,
 with observation calls at the boundaries that define each event. Paired
 `BEGIN/END MEGALENS OBSERVABILITY` comments identify those integration points.
 
+The current integration includes main `bbc208e00f2a201783938ef549f5058d6047e4c0`.
+Independent native training repairs and external fix payloads have been removed
+from the integration MR; their implementations and tests live in the
+[related MRs](megalens-related-mrs.md). Hybrid-CP and DualPipeV configurations
+that need those repairs require their owning MRs. Unmodified upstream Core
+currently imports Triton, so provide a real Triton installation for the CPU gate
+until the separate optional-import repair is merged.
+
 ## Implementation ownership
 
 | Native entry point | Observation implementation | Boundary retained in the native flow |

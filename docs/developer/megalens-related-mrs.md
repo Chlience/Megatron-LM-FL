@@ -11,19 +11,21 @@ ownership, the native control-flow boundaries and checks for upstream updates.
 
 ## Independent submissions
 
-All seven submissions are Draft MRs. Follow their links for current merge status.
+All nine submissions are Draft MRs. Follow their links for current merge status.
 
 | Repository / target | MR | Change | Commit | Runtime or merge dependency |
 |---|---|---|---|---|
-| flagos-ai/Megatron-LM-FL / `main` | [#195](https://github.com/flagos-ai/Megatron-LM-FL/pull/195) | Core import compatibility without Triton | `39aaba7bc` | Required for the existing CPU/no-Triton import guarantee; merge independently into main. |
-| flagos-ai/Megatron-LM-FL / `main` | [#196](https://github.com/flagos-ai/Megatron-LM-FL/pull/196) | Hybrid-CP helper calls and subsample metadata | `b1f7716dd` | Required only when using Hybrid-CP; ordinary CP2/TE profiles do not depend on it. |
-| flagos-ai/Megatron-LM-FL / `main` | [#197](https://github.com/flagos-ai/Megatron-LM-FL/pull/197) | DualPipeV combined backward without shared experts | `e0bfd2bdd` | Required only for this native DualPipeV configuration; observation extensions remain separate. |
-| flagos-ai/FlagScale / `main` | [#1305](https://github.com/flagos-ai/FlagScale/pull/1305) | Dense/packed batch broadcast correction | `7a27af2e1` | Independent of MegaLens; preserves SFT/Hybrid-CP packed transport. |
-| flagos-ai/FlagScale / `main` | [#1306](https://github.com/flagos-ai/FlagScale/pull/1306) | Opt-in MegaLens lifecycle integration | `415429a0f` | Requires a compatible Core build containing #104; has no source dependency on the dense-batch PR. |
-| flagos-ai/TransformerEngine-FL / `main` | [#133](https://github.com/flagos-ai/TransformerEngine-FL/pull/133) | CUDA normalization quantizer dtype forwarding | `65e0c5a1c` | Relevant to FP8 normalization using this CUDA adapter; native bindings and hardware validation pending. |
-| deepseek-ai/DeepEP / `hybrid-ep` | [#775](https://github.com/deepseek-ai/DeepEP/pull/775) | Toolkit NVTX/CCCL build discovery | `d1c05b412` | Targets hybrid-ep, not main; full HybridEP JIT/device validation pending. |
+| flagos-ai/Megatron-LM-FL / `main` | [#195](https://github.com/flagos-ai/Megatron-LM-FL/pull/195) | Core import compatibility without Triton | `eae39b944` | Enables Core imports without Triton. #104 currently follows upstream and requires real Triton until this repair merges. |
+| flagos-ai/Megatron-LM-FL / `main` | [#196](https://github.com/flagos-ai/Megatron-LM-FL/pull/196) | Hybrid-CP helper calls and subsample metadata | `f581bb9cf` | Required only when using Hybrid-CP; ordinary CP2/TE profiles do not depend on it. |
+| flagos-ai/Megatron-LM-FL / `main` | [#197](https://github.com/flagos-ai/Megatron-LM-FL/pull/197) | DualPipeV combined backward without shared experts | `953487750` | Required only for this native DualPipeV configuration; observation extensions remain separate. |
+| flagos-ai/FlagScale / `main` | [#1305](https://github.com/flagos-ai/FlagScale/pull/1305) | Dense/packed batch broadcast correction | `fc8e063e9` | Independent of MegaLens; preserves SFT/Hybrid-CP packed transport. |
+| flagos-ai/FlagScale / `main` | [#1306](https://github.com/flagos-ai/FlagScale/pull/1306) | Opt-in MegaLens lifecycle integration | `ca5fa3a34` | Requires a compatible Core build containing #104; has no source dependency on the dense-batch PR. |
+| flagos-ai/TransformerEngine-FL / `main` | [#133](https://github.com/flagos-ai/TransformerEngine-FL/pull/133) | CUDA normalization quantizer dtype forwarding | `9357d5668` | Relevant to FP8 normalization using this CUDA adapter; native bindings and hardware validation pending. |
+| deepseek-ai/DeepEP / `hybrid-ep` | [#775](https://github.com/deepseek-ai/DeepEP/pull/775) | Toolkit NVTX/CCCL build discovery | `7e2b06df3` | Targets hybrid-ep, not main; full HybridEP JIT/device validation pending. |
+| flagos-ai/Megatron-LM-FL / `main` | [#209](https://github.com/flagos-ai/Megatron-LM-FL/pull/209) | ModelOpt checkpoint helper arguments, result and override path | `35d9631c6` | Independent native checkpoint repair; no runtime dependency on MegaLens. |
+| flagos-ai/Megatron-LM-FL / `main` | [#210](https://github.com/flagos-ai/Megatron-LM-FL/pull/210) | Biencoder duplicate checkpoint-name argument | `ae80dda50` | Independent native checkpoint repair; no runtime dependency on MegaLens. |
 
-The three native Megatron fixes add no MegaLens import, event or trace interface.
+The five native Megatron fixes add no MegaLens import, event or trace interface.
 The DualPipeV fix does not include dedicated observation; the existing 44 generic
 P2P wait observations remain in #104. The FlagScale integration changes three
 training files and does not include the separate batch broadcast correction.
@@ -32,16 +34,16 @@ training files and does not include the separate batch broadcast correction.
 
 | Repository / target | Reviewed base |
 |---|---|
-| Megatron-LM-FL main | `b471409ac414d760c42a4b159725c2acd2676166` (v0.18.2) |
-| FlagScale main | `f8e9a62c499d526a6ffa47f533bcf342330b7326` |
-| TransformerEngine-FL main | `2457a3928291bb9944b7123ad84243d0964a114b` |
-| DeepEP hybrid-ep | `10d4dd7377d5bce900fbb4b80cce863764892b95` |
-| DeepEP main, inspected only | `93eb6eb238127e96c6d7a4a625a6dad158348509` |
+| Megatron-LM-FL main | `bbc208e00f2a201783938ef549f5058d6047e4c0` (v0.18.2) |
+| FlagScale main | `eb9dc045a8aa343c127de4e2b9dd4ad113e6d1e0` |
+| TransformerEngine-FL main | `6df49429794d18109f0d04d924a14e032cdc220b` |
+| DeepEP hybrid-ep | `4e890fd19a3a52f23cc7bd38a0d9b0b1276f70d6` |
 
 - FlagScale's batch helper now lives in `training/utils/common_utils.py`.
   Its current training flow uses `step_batch_size_schedule`, which replaces the
   old overlay's dynamic-batch argument in the sample-range tracing restriction.
-  Existing checkpoint, fault injection, RL and performance-monitor calls remain.
+  Existing checkpoint, fault injection, RL and performance-monitor calls remain;
+  the latest asynchronous checkpoint callbacks retain both new finalization arguments.
 - TE-FL normalization still lacks native quantizer dtype normalization.
   The revised forwarding fix catches only conversion compatibility errors and
   preserves the object, argument and result contracts.
@@ -75,9 +77,13 @@ Do not create duplicate MRs for the following:
 | FlagScale #1306 | 24 | Argument validation, lazy ownership, skip/exception boundaries and mode-1 alignment |
 | TE-FL #133 | 22 | 14 normalization forwarding contracts and 8 existing UserBuffer contracts |
 | DeepEP #775 | 13 | 12 toolkit/extension-configuration cases and the existing C++ standard check |
+| Megatron #209 | 13 | Native helper signature/four-field results, restoration, path override, failures and sharded delegation |
+| Megatron #210 | 12 | Real CPU checkpoint files, both optimizer settings, default/custom paths and full/query/context loads |
 
-These are 75 CPU/contract checks. Restoring the reviewed upstream source for the
-six fixes produces 19 expected failures in the corresponding regression suites.
+These seven refreshed submissions pass 75 CPU/contract checks against the
+reviewed targets above. The two additional checkpoint MRs pass 13 and 12 cases.
+Their unmodified main sources reproduce 9 and 12 failures respectively. The earlier
+six-fix differential (19 failures) remains tied to its originally recorded bases.
 The FlagScale integration also preserves all 120 original function ASTs after
 removing its added observation calls/wrappers, with 20 paired observation markers.
 Vendored globals and arguments imported with the current MegaLens Core.
@@ -90,29 +96,42 @@ configuration with a constructor substitute. These checks do not prove compiled
 bindings, NVCC/JIT execution, FP8 numerics, GPU/NCCL ordering, CUDA Graph replay,
 full distributed CI, training outcomes or runtime overhead.
 
-Black/isort checks passed for the affected native/TE files and relevant tests;
-FlagScale's new tests passed Ruff and formatting; all staged diffs passed
-whitespace and scope checks. The 781 main-integration CPU checks and packaging
-results remain evidence for source revision `690c9d9f096da6bfe4c578361986e7d62442274b`.
-The subsequent Core integration refactor has its own validation; these historical
-results are not evidence for changed implementation files.
+New checkpoint tests pass Black/isort. Native formatting and import layouts are
+preserved when unrelated to the repair, including Hybrid-CP's first multiline
+backward call and DeepEP's existing imports. Refreshed scoped diffs pass whitespace
+checks; inherited upstream formatting is not rewritten.
+
+The main integration passes the source/target scanner and 715 CPU checks after
+removing the relocated Triton-only assertion (previously 716). Its unchanged
+shared DualPipeV wait-routing regression passes independently. It uses a real
+Triton installation; the optional-import repair is not hidden inside Probe.
+Packaging and GPU records retain their original source revisions.
 
 ## Merge and patch retirement
 
-#104 temporarily retains its working native fixes and patches used by the pinned
-older work image. Opening these MRs does not establish that a dependency is merged
-or that a replacement build has been validated.
+#104 contains no independent native training repair implementation or dedicated
+repair tests. Hybrid-CP, paged stash and DualPipeV fwdbwd match the reviewed main
+byte for byte. The upstream-covered dense/NVML-only regressions also leave #104.
+The 44 generic DualPipeV P2P waits and their observation regression remain.
 
-1. Merge the independent native fixes into Megatron main, then merge updated main
-   into `feature/megalens-cuda` normally. Reconcile duplicate regressions at that
-   point; no forced push or historical rewrite is required.
-2. Make the MegaLens-enabled Core build available before merging/activating the
-   FlagScale lifecycle integration. The dense broadcast fix can merge independently.
-3. For external fixes, pin the accepted source/build version and validate the
-   installed package, overlay import source and affected training profile before
-   removing the corresponding old patch from the work image.
-4. Recheck trace-off/on on the affected PP/DP/TP/EP profiles, checkpoints and trace
-   lifecycle. FP8, Hybrid-CP, DualPipeV and HybridEP require their own device paths.
+The active FlagScale overlay has only the three observation files. TE and DeepEP
+repair patch payloads are removed. Docker still installs the immutable prebuilt
+wheels with their original hashes and records the historical patch hashes as
+artifact provenance; it does not read the removed patch files. The installed
+UserBuffer verifier remains useful for that older wheel. This is not a dependency
+upgrade or a claim that the old Graph training path works without its batch repair.
+
+1. Merge independent repairs into their owning target, then merge main into
+   `feature/megalens-cuda` normally. No history rewrite is required.
+2. Until then, configurations needing Hybrid-CP, DualPipeV without shared experts,
+   optional Triton, or FlagScale dense/Graph repairs must use the owning fix build.
+   Ordinary CP2/TE profiles do not use the Hybrid-CP scheduler.
+3. Provide a compatible Core build containing #104 before activating FlagScale
+   #1306. Its dense broadcast fix can merge independently.
+4. Validate the installed versions, module origins and affected training paths
+   before changing pinned dependency wheels or claiming new GPU results.
 
 Frozen archives and historical reproduction packages retain their original
-patches, versions and evidence.
+patches, versions and evidence. Autoresume FLOPs propagation and DualPipeV's
+nondefault activation-checkpoint call require separate semantic work; they are
+not repaired by passing zero or dropping an argument in these submissions.

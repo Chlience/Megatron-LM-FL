@@ -916,5 +916,209 @@
       "Required local scopes, training iteration envelope, DP stream/coalescing and independent training fixes remain unchanged.",
       "Existing whitespace issues in other MR files remain outside this formatting-only scope."
     ]
+  },
+  "scope_cleanup": {
+    "status": "passed",
+    "acceptance": [
+      "G1.17",
+      "G1.18",
+      "E1.7"
+    ],
+    "code_revision": "b0807cd717f5f28cd56cdf890bde43eb4c67771b",
+    "code_tree": "57a76aa9456d66d5641cf0c02e1383723994b6b0",
+    "upstream_main": "bbc208e00f2a201783938ef549f5058d6047e4c0",
+    "before_revision": "a97f58f03250202f557e951f6b05743b332a8dab",
+    "merge_revision": "f9ca132943752844d1e280210e0aee4e8152b57a",
+    "native_removal_revision": "093d32f58029398b7505d8f1e3c3678c2a0c99cc",
+    "mixedpara_baseline": "12fb7169ce30fdb62b50f86b41afa09336a523ea",
+    "restored_upstream_files": {
+      "megatron/core/pipeline_parallel/hybrid_cp_schedule.py": "9530f89d5ed66c2c1291e8894c6ed718b421ed73d441c68649f8889ce1a90a82",
+      "megatron/core/transformer/moe/paged_stash.py": "5485c2b84f05c9ab5bd897fe7c9e6410cfed44b418097369f8530e531bb734b9",
+      "megatron/plugin/dualpipev/fb_overlap/overlap_funcs/fwdbwd.py": "d20246e1b6335efa067da4b89317cc6f606e26fa76204d22d065628107ddbdc2",
+      "tests/unit_tests/test_utils.py": "269ed1c1c988b4a90548aab28b97d45bdac42114fdafbcd6e4a257963ea02b1c"
+    },
+    "probe_fixture_and_shared_wait_source_bytes": "unchanged from before_revision",
+    "cpu": {
+      "passed": 715,
+      "warnings": 11,
+      "source_target_scanner": "passed",
+      "target_live": 49,
+      "target_dead": 0,
+      "retained_dualpipev_wait_routing_regression_passed": 1,
+      "merge_stage_tests_passed": 716,
+      "upstream_CI_runner_tests_passed": 20,
+      "environment": "Python 3.12, PyTorch 2.8.0+cpu and real Triton 3.4.0. An environment-only .pth shares the validation tools installation. No source shim, xfail or missing-Triton skip was added.",
+      "removed_assertion": "The dedicated missing-Triton assertion moved to #195; upstream imports now require installed Triton."
+    },
+    "external_payloads_removed": [
+      "docker/patches/deepep-cu128.patch",
+      "docker/patches/transformer-engine-fl-v0.2.0-layernorm-quantizer-dtype.patch",
+      "docker/patches/transformer-engine-fl-v0.2.0-userbuffer-ops.patch",
+      "flagscale-megalens.patch utils.py repair hunk"
+    ],
+    "work_image": {
+      "overlay": {
+        "baseline": "6d775cd01d5c822f9413b9952a81652c917d273e",
+        "overlay_sha256": "35d0a83f68b4e30497cf67c01a6a3e0fefc877534810103a7868991c6eb20059",
+        "files": [
+          {
+            "path": "flagscale/train/megatron/training/arguments.py",
+            "before": "913b47495a8e58ed4aac8d4c72cede063afbbaa79ed61ee900e90979e9441667",
+            "after": "92d165052a803b7cbdb0a07be4543677dd8d2485cb4e010cc0de623c90261f62"
+          },
+          {
+            "path": "flagscale/train/megatron/training/global_vars.py",
+            "before": "d7c73b0764c4b192cd2e5e3cc46fc2cffbdca3dc3beeef703139e8b3f9b9914e",
+            "after": "3cd4cc3c6cf1c48fd24a7cfb663a9795c1a82783e6b40b7bba61f4ac12053c4c"
+          },
+          {
+            "path": "flagscale/train/megatron/training/training.py",
+            "before": "d3eace40ed2bbc2e24e51f801201aaaa406a3d68cbde8614981c0643169a36a2",
+            "after": "9f0e179d3b3140f30ca017874d55efe99c80b5ccb55636f63e78815bb1cb7ebe"
+          }
+        ]
+      },
+      "docker_RUN_bash_syntax_passed": 6,
+      "final_contract_tests_passed": 7,
+      "wheel_hashes": "unchanged",
+      "historical_patch_hashes": "retained as prebuilt wheel provenance; Docker does not read the removed payloads",
+      "gate_source_limit": "Full gate passed before the final overlay EOF separator trim and repository-name comment correction; the resulting overlay apply/hash checks and all seven work-image contracts passed after the trim."
+    },
+    "related_MRs": [
+      {
+        "name": "megatron-triton",
+        "upstream": "bbc208e00f2a201783938ef549f5058d6047e4c0",
+        "paths": [
+          "megatron/core/transformer/moe/paged_stash.py",
+          "tests/unit_tests/transformer/moe/test_paged_stash_optional_triton.py"
+        ],
+        "head": "eae39b94478bb39a5e1a51de4e79d8845d45414d",
+        "tests": 1,
+        "branch": "fix/paged-stash-optional-triton",
+        "remote": "origin",
+        "remote_head_verified": true
+      },
+      {
+        "name": "megatron-hybrid-cp",
+        "upstream": "bbc208e00f2a201783938ef549f5058d6047e4c0",
+        "paths": [
+          "megatron/core/pipeline_parallel/hybrid_cp_schedule.py",
+          "tests/unit_tests/pipeline_parallel/test_hybrid_cp_schedule.py"
+        ],
+        "head": "f581bb9cf012c070770a0c9ad1e502abfec3e616",
+        "tests": 1,
+        "branch": "fix/hybrid-cp-helper-metadata",
+        "remote": "origin",
+        "remote_head_verified": true
+      },
+      {
+        "name": "megatron-dualpipev",
+        "upstream": "bbc208e00f2a201783938ef549f5058d6047e4c0",
+        "paths": [
+          "megatron/plugin/dualpipev/fb_overlap/overlap_funcs/fwdbwd.py",
+          "tests/unit_tests/a2a_overlap/test_fwdbwd_shared_experts.py"
+        ],
+        "head": "953487750c10f3adb2dde5edf54b2a160eed0243",
+        "tests": 2,
+        "branch": "fix/dualpipev-no-shared-expert",
+        "remote": "origin",
+        "remote_head_verified": true
+      },
+      {
+        "name": "flagscale",
+        "upstream": "eb9dc045a8aa343c127de4e2b9dd4ad113e6d1e0",
+        "paths": [
+          "flagscale/train/megatron/training/utils/common_utils.py",
+          "tests/unit_tests/train/megatron/test_dense_batch_metadata.py"
+        ],
+        "head": "fc8e063e9553d8791121d3dca5ab61a42157d38b",
+        "tests": 12,
+        "branch": "fix/dense-batch-packed-metadata",
+        "remote": "fork",
+        "remote_head_verified": true
+      },
+      {
+        "name": "flagscale-megalens",
+        "upstream": "eb9dc045a8aa343c127de4e2b9dd4ad113e6d1e0",
+        "paths": [
+          "docs/train/megalens.md",
+          "flagscale/train/megatron/training/arguments.py",
+          "flagscale/train/megatron/training/global_vars.py",
+          "flagscale/train/megatron/training/training.py",
+          "tests/unit_tests/train/megatron/test_megalens_runtime.py"
+        ],
+        "head": "ca5fa3a3404b1f55ec8fbdffcc90df43428001d0",
+        "tests": 24,
+        "branch": "feat/megalens-training-runtime",
+        "remote": "fork",
+        "remote_head_verified": true
+      },
+      {
+        "name": "transformer-engine",
+        "upstream": "6df49429794d18109f0d04d924a14e032cdc220b",
+        "paths": [
+          "tests/plugin/plugin/test_cuda_norm_quantizer_contract.py",
+          "transformer_engine/plugin/core/backends/vendor/cuda/cuda.py"
+        ],
+        "head": "9357d5668b64026d4007534e88d7263b0352f8f2",
+        "tests": 22,
+        "branch": "fix/cuda-norm-quantizer-dtype",
+        "remote": "fork",
+        "remote_head_verified": true
+      },
+      {
+        "name": "deepep-hybrid",
+        "upstream": "4e890fd19a3a52f23cc7bd38a0d9b0b1276f70d6",
+        "paths": [
+          "setup.py",
+          "tests/test_setup_cuda_toolkit.py"
+        ],
+        "head": "7e2b06df372f1a7d44ed85624b6ab9ea66a1662b",
+        "tests": 13,
+        "branch": "fix/cuda-toolkit-build-compat",
+        "remote": "fork",
+        "remote_head_verified": true
+      }
+    ],
+    "additional_native_checkpoint_MRs": [
+      {
+        "name": "megatron-modelopt",
+        "acceptance": "G1.19",
+        "head": "35d9631c6b69dd00383e3815459e74f89975a826",
+        "target": "bbc208e00f2a201783938ef549f5058d6047e4c0",
+        "paths": [
+          "megatron/post_training/checkpointing.py",
+          "tests/unit_tests/post_training/test_modelopt_checkpoint_contract.py"
+        ],
+        "passed": 13,
+        "before_failed": 9,
+        "mr": "https://github.com/flagos-ai/Megatron-LM-FL/pull/209"
+      },
+      {
+        "name": "megatron-biencoder",
+        "acceptance": "G1.20",
+        "head": "ae80dda50cde534a0588175138fa24fbf37ab495",
+        "target": "bbc208e00f2a201783938ef549f5058d6047e4c0",
+        "paths": [
+          "megatron/training/checkpointing.py",
+          "tests/unit_tests/test_biencoder_checkpoint_contract.py"
+        ],
+        "passed": 12,
+        "before_failed": 12,
+        "mr": "https://github.com/flagos-ai/Megatron-LM-FL/pull/210"
+      }
+    ],
+    "flagscale_native_AST": {
+      "functions": 120,
+      "paired_markers": 20,
+      "matches_latest_main_after_removing_observation": true,
+      "checkpoint_finalization_arguments": "preserved from latest main"
+    },
+    "format": "Scoped staged whitespace checks pass. Native call formatting and import layout are preserved; new checkpoint tests pass Black and isort.",
+    "limits": [
+      "Independent repair implementations and dedicated tests are absent from #104; related Hybrid-CP/DualPipeV, no-Triton and FlagScale dense/Graph paths require their owning repair builds.",
+      "No image rebuild, packaging, GPU/NCCL, CUDA Graph, native ModelOpt/TE bindings, FP8, DeepEP NVCC/JIT, full FlagScale training matrix or overhead measurement was performed. Earlier hardware and artifact records retain their source identities.",
+      "Autoresume FLOPs propagation and the DualPipeV nondefault activation-checkpoint argument path are recorded semantic follow-ups, not patched with zero or a discarded argument."
+    ]
   }
 }

@@ -59,7 +59,8 @@ requires training validation with the selected CUDA, Transformer Engine, and Fla
 The recorded formal GPU runs use FlagScale revision
 `6d775cd01d5c822f9413b9952a81652c917d273e` and the pinned environment in
 `docker/Dockerfile.work`.
-Keep that image definition as the reproduction contract for those runs.
+Those runs retain their recorded source and image identity. The current work-image definition
+keeps the pinned wheels but no longer bundles independent training-repair patch sources.
 
 The recorded dev-image acceptance used a temporary image derived from
 `harbor.baai.ac.cn/flagscale/flagscale-train:dev-cu128-py3.12-20260319182856`, with
@@ -68,9 +69,13 @@ Megatron-LM-FL revision `13ef6ae7ed8e3ac35143f3e03526674d12194fc6` and FlagScale
 FlagScale gives its vendored `megatron.training` package import priority. Apply the
 `docker/patches/flagscale-megalens.patch` compatibility overlay
 so that this entry receives the MegaLens arguments, runtime ownership, iteration/optimizer scopes,
-and shutdown lifecycle. The `utils.py` hunk carries the dense-batch metadata-broadcast correction
-used by the separately validated whole-iteration CUDA Graph path. Recheck the patch when using
-another FlagScale revision.
+and shutdown lifecycle. The overlay changes only `arguments.py`, `global_vars.py`, and
+`training.py`. The independent dense-batch metadata correction belongs to
+[FlagScale #1305](https://github.com/flagos-ai/FlagScale/pull/1305), while
+[#1306](https://github.com/flagos-ai/FlagScale/pull/1306) ports the observation integration to
+current FlagScale main. The historical whole-iteration CUDA Graph result includes the old
+batch repair and does not validate this reduced overlay. Recheck patches against the selected
+FlagScale revision; current-main repair diffs do not directly apply to its older layout.
 
 #### Step 1: prepare a writable derived image
 
