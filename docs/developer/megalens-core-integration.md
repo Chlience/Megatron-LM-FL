@@ -108,6 +108,18 @@ observation keyword parameters. This is an actual signature extension to review.
 MoE's diff line count can grow when helper definitions are separated from the
 native `postprocess`; declaration alignment is the acceptance criterion.
 
+## Open review TODOs
+
+- [ ] Restore native P2P group selection inside `_p2p_ops`. The current call to
+  `_p2p_groups` at line 94 extracts upstream logic to share it with observation.
+  Restore `_p2p_ops` verbatim from main; put observation-only group resolution in
+  `megatron/megalens/probes/p2p.py` behind the collection gate, and remove the
+  Core helper/callback. Verify PP=2 versus larger groups, even/odd ranks and the
+  UCC exception against the groups actually passed to native isend/irecv.
+  Preserve backend fields, Work identity, request order and wait/sync counts;
+  trace-off must add no group/backend queries. This is pending implementation;
+  the provenance documentation update does not change the P2P code.
+
 ## Invariants when updating upstream
 
 - Preserve native signatures, branch order, return values, exceptions and raw

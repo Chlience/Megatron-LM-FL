@@ -8,6 +8,8 @@ their owning repositories with their own regression tests.
 
 The [Core integration review guide](megalens-core-integration.md) describes probe
 ownership, the native control-flow boundaries and checks for upstream updates.
+The [change-origin inventory](megalens-change-origins.md) accounts for the main
+MR's added lines and identifies the MixedPara source modules and target additions.
 
 ## Independent submissions
 
