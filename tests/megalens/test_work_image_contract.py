@@ -14,12 +14,6 @@ _ROOT = Path(__file__).resolve().parents[2]
 _DOCKERFILE = _ROOT / "docker" / "Dockerfile.work"
 _WHEEL_MANIFEST = _ROOT / "docker" / "work-wheels.sha256"
 _FLAGSCALE_PATCH = _ROOT / "docker" / "patches" / "flagscale-megalens.patch"
-_USERBUFFER_PATCH = (
-    _ROOT
-    / "docker"
-    / "patches"
-    / "transformer-engine-fl-v0.2.0-userbuffer-ops.patch"
-)
 _VERIFY_SCRIPT = _ROOT / "docker" / "verify_transformer_engine_userbuffer.py"
 
 _VERIFY_SPEC = importlib.util.spec_from_file_location(
@@ -36,17 +30,18 @@ def _docker_arg(text: str, name: str) -> str:
     return match.group(1)
 
 
-def test_userbuffer_patch_is_pinned_by_the_work_image() -> None:
+def test_prebuilt_userbuffer_wheel_retains_its_provenance() -> None:
     dockerfile = _DOCKERFILE.read_text(encoding="utf-8")
-    patch_bytes = _USERBUFFER_PATCH.read_bytes()
-    patch_sha256 = hashlib.sha256(patch_bytes).hexdigest()
-
-    assert _docker_arg(dockerfile, "TE_FL_USERBUFFER_PATCH_SHA256") == patch_sha256
+    assert _docker_arg(dockerfile, "TE_FL_USERBUFFER_PATCH_SHA256") == (
+        "4aed8c3c55e49349b65636cecc7560514f368af4b1a7b9577cce02eb8fcd4a3e"
+    )
     assert (
-        '"${TE_FL_USERBUFFER_PATCH_SHA256}" '
-        '"${PROJECT_ROOT}/docker/patches/'
-        'transformer-engine-fl-v0.2.0-userbuffer-ops.patch"'
-        in dockerfile
+        '"${TE_FL_WHEEL_SHA256}" '
+        '"/tmp/flagos-wheels/transformer_engine-2.14.0-cp312-cp312-linux_x86_64.whl"'
+    ) in dockerfile
+    assert not re.search(
+        r'\$\{PROJECT_ROOT\}/docker/patches/(?:transformer-engine|deepep-cu128)',
+        dockerfile,
     )
     assert (
         'org.flagos.transformer-engine-fl.userbuffer.patch.sha256='
@@ -69,26 +64,14 @@ def test_flagscale_patch_preserves_graph_compatibility_and_is_pinned() -> None:
     assert "and args.continuous_trace_iterations != 1" not in patch
     assert "args.trace_mode != 0 and args.trace_cupti_kernels != 'off'" in patch
     assert "Python scopes inside managed capture/replay are" in patch
-    assert (
-        "broadcast_packed_sequence_metadata = "
-        "args.hybrid_context_parallel or args.sft"
-    ) in patch
-    assert patch.count("if broadcast_packed_sequence_metadata:") == 5
+    assert re.findall(r"^diff --git a/(\S+) b/\S+$", patch, re.MULTILINE) == [
+        f"flagscale/train/megatron/training/{name}"
+        for name in ("arguments.py", "global_vars.py", "training.py")
+    ]
     assert (
         '"92d165052a803b7cbdb0a07be4543677dd8d2485cb4e010cc0de623c90261f62" '
         '"${FLAGSCALE_ROOT}/flagscale/train/megatron/training/arguments.py"'
     ) in dockerfile
-    assert (
-        '"f4a31581bd93b6e53500e520a72312adf2f069e23634d176c97d707a0558c45c" '
-        '"${FLAGSCALE_ROOT}/flagscale/train/megatron/training/utils.py"'
-    ) in dockerfile
-    assert (
-        '"e5e6166aca7a7ac7db62e261217cc5e8eb6bdc829d5637c4f5f8cf2094968cf9" '
-        '"${FLAGSCALE_ROOT}/flagscale/train/megatron/training/utils.py"'
-    ) in dockerfile
-    assert dockerfile.count(
-        '"${FLAGSCALE_ROOT}/flagscale/train/megatron/training/utils.py"'
-    ) == 3
 
 
 def test_flagscale_archive_source_contract_matches_enforced_checks() -> None:
@@ -139,7 +122,7 @@ def test_flagscale_archive_source_contract_matches_enforced_checks() -> None:
         r'"[0-9a-f]{64}" "\$\{FLAGSCALE_ROOT\}/flagscale/train/'
         r'megatron/training/([^"/]+)"'
     )
-    expected_files = {"arguments.py", "global_vars.py", "training.py", "utils.py"}
+    expected_files = {"arguments.py", "global_vars.py", "training.py"}
     assert set(re.findall(file_pattern, before_patch)) == expected_files
     assert set(re.findall(file_pattern, after_patch)) == expected_files
     assert "| sha256sum -c -" in before_patch

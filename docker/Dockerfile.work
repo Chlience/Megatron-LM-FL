@@ -239,15 +239,15 @@ RUN source /root/miniconda3/etc/profile.d/conda.sh \
 
 # Install the manually validated DeepEP wheel and its two staged runtime
 # dependencies without resolving packages from an index. The DeepEP wheel was
-# built from DEEP_EP_REVISION after applying the reviewable CUDA 12.8 diff at
-# docker/patches/deepep-cu128.patch; DEEP_EP_SETUP_SHA256 records its result.
+# built from DEEP_EP_REVISION with the CUDA 12.8 adaptation now maintained in
+# deepseek-ai/DeepEP#775. DEEP_EP_PATCH_SHA256 and DEEP_EP_SETUP_SHA256 retain
+# the historical build provenance; this image installs the fixed wheel.
 # HybridEP's newer CCCL headers are activated only by explicitly sourcing
 # /opt/flagos/env/hybridep-cu128-env.sh.
 RUN source /root/miniconda3/etc/profile.d/conda.sh \
     && conda activate flagscale-train \
     && test "${CONDA_DEFAULT_ENV}" = "flagscale-train" \
     && printf '%s  %s\n' \
-        "${DEEP_EP_PATCH_SHA256}" "${PROJECT_ROOT}/docker/patches/deepep-cu128.patch" \
         "${DEEP_EP_WHEEL_SHA256}" "/tmp/flagos-wheels/deep_ep-1.2.1-cp312-cp312-linux_x86_64.whl" \
         "${PYNVML_WHEEL_SHA256}" "/tmp/flagos-wheels/pynvml-13.0.1-py3-none-any.whl" \
         "${CUDA_CCCL_WHEEL_SHA256}" "/tmp/flagos-wheels/nvidia_cuda_cccl_cu12-12.9.27-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl" \
@@ -270,8 +270,10 @@ RUN source /root/miniconda3/etc/profile.d/conda.sh \
 
 # Replace the base image's incompatible TE-FL snapshot with the manually
 # validated v0.2.0 source build. The wheel contains the independently
-# reviewable LayerNorm/RMSNorm quantizer dtype and UserBuffer CUDA adapter
-# compatibility diffs recorded under docker/patches. TE_FL_STRICT=0 pins the
+# reviewed LayerNorm/RMSNorm quantizer dtype and UserBuffer CUDA adapter
+# compatibility fixes. The patch hashes retain the historical wheel provenance;
+# normalization is maintained in flagos-ai/TransformerEngine-FL#133 and main
+# already contains the UserBuffer fixes. TE_FL_STRICT=0 pins the
 # selected vendor implementation in v0.2.0, so unsupported operations fail at
 # their original call site instead of silently falling back to another
 # registered implementation.
@@ -279,8 +281,6 @@ RUN source /root/miniconda3/etc/profile.d/conda.sh \
     && conda activate flagscale-train \
     && test "${CONDA_DEFAULT_ENV}" = "flagscale-train" \
     && printf '%s  %s\n' \
-        "${TE_FL_PATCH_SHA256}" "${PROJECT_ROOT}/docker/patches/transformer-engine-fl-v0.2.0-layernorm-quantizer-dtype.patch" \
-        "${TE_FL_USERBUFFER_PATCH_SHA256}" "${PROJECT_ROOT}/docker/patches/transformer-engine-fl-v0.2.0-userbuffer-ops.patch" \
         "${TE_FL_WHEEL_SHA256}" "/tmp/flagos-wheels/transformer_engine-2.14.0-cp312-cp312-linux_x86_64.whl" \
         "${NVDLFW_INSPECT_WHEEL_SHA256}" "/tmp/flagos-wheels/nvdlfw_inspect-0.2.2-py3-none-any.whl" \
         | sha256sum -c - \
@@ -342,10 +342,10 @@ RUN source /root/miniconda3/etc/profile.d/conda.sh \
 # FlagScale's runner prepends its vendored megatron.training package to
 # PYTHONPATH. Apply the reviewable compatibility diff that mirrors the
 # Megatron-LM-FL MegaLens arguments, runtime lifecycle, iteration scope,
-# optimizer probes, and dense-batch Graph compatibility.
+# and optimizer probes. Native training fixes are maintained in separate MRs.
 # Revision and tree are checked when Git metadata is present. Archive builds
 # record them as provenance metadata; the patch and pre/post hashes pin the
-# four reviewed vendored files. FlagScale is installed without cuda-train
+# three reviewed vendored files. FlagScale is installed without cuda-train
 # extras so its MCore 0.16 pin cannot replace the validated MCore 0.17.1 source.
 RUN source /root/miniconda3/etc/profile.d/conda.sh \
     && conda activate flagscale-train \
@@ -355,11 +355,10 @@ RUN source /root/miniconda3/etc/profile.d/conda.sh \
         && test "$(git -C "${FLAGSCALE_ROOT}" rev-parse HEAD^{tree})" = "${FLAGSCALE_TREE}"; \
     fi \
     && printf '%s  %s\n' \
-        "1c736ab435c430931072017cb4d958f805bd9cc60fef0ffd9a046ae6957e851b" "/tmp/flagscale-megalens.patch" \
+        "35d0a83f68b4e30497cf67c01a6a3e0fefc877534810103a7868991c6eb20059" "/tmp/flagscale-megalens.patch" \
         "913b47495a8e58ed4aac8d4c72cede063afbbaa79ed61ee900e90979e9441667" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/arguments.py" \
         "d7c73b0764c4b192cd2e5e3cc46fc2cffbdca3dc3beeef703139e8b3f9b9914e" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/global_vars.py" \
         "d3eace40ed2bbc2e24e51f801201aaaa406a3d68cbde8614981c0643169a36a2" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/training.py" \
-        "f4a31581bd93b6e53500e520a72312adf2f069e23634d176c97d707a0558c45c" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/utils.py" \
         | sha256sum -c - \
     && git -C "${FLAGSCALE_ROOT}" apply --check /tmp/flagscale-megalens.patch \
     && git -C "${FLAGSCALE_ROOT}" apply /tmp/flagscale-megalens.patch \
@@ -367,13 +366,11 @@ RUN source /root/miniconda3/etc/profile.d/conda.sh \
         "92d165052a803b7cbdb0a07be4543677dd8d2485cb4e010cc0de623c90261f62" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/arguments.py" \
         "3cd4cc3c6cf1c48fd24a7cfb663a9795c1a82783e6b40b7bba61f4ac12053c4c" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/global_vars.py" \
         "9f0e179d3b3140f30ca017874d55efe99c80b5ccb55636f63e78815bb1cb7ebe" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/training.py" \
-        "e5e6166aca7a7ac7db62e261217cc5e8eb6bdc829d5637c4f5f8cf2094968cf9" "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/utils.py" \
         | sha256sum -c - \
     && python -m py_compile \
         "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/arguments.py" \
         "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/global_vars.py" \
         "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/training.py" \
-        "${FLAGSCALE_ROOT}/flagscale/train/megatron/training/utils.py" \
     && python -m pip install \
         --no-cache-dir \
         --no-deps \
@@ -389,7 +386,7 @@ RUN source /root/miniconda3/etc/profile.d/conda.sh \
         "${MEGATRON_CODE_PARENT}" \
         "${FLAGSCALE_REVISION}" \
         "${FLAGSCALE_TREE}" \
-        "1c736ab435c430931072017cb4d958f805bd9cc60fef0ffd9a046ae6957e851b" \
+        "35d0a83f68b4e30497cf67c01a6a3e0fefc877534810103a7868991c6eb20059" \
         "${EMERGING_OPTIMIZERS_REVISION}" \
         "${EMERGING_OPTIMIZERS_WHEEL_SHA256}" \
         "${DEEP_EP_REVISION}" \
