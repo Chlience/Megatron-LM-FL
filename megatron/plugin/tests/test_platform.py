@@ -408,6 +408,19 @@ class _FakeMstx:
         return "pop"
 
 
+class _FakeBrtx:
+    """Stand-in for torch_supa.supa.brtx range markers."""
+
+    def range(self, msg, *args, **kwargs):
+        return ("range", msg)
+
+    def range_push(self, msg, *args, **kwargs):
+        return ("push", msg)
+
+    def range_pop(self, *args, **kwargs):
+        return "pop"
+
+
 class _FakeAccelerator:
     Stream = "stream-type"
     Event = "event-type"
@@ -422,6 +435,7 @@ class _FakeAccelerator:
     MUSAGraph = _FakeGraph
     TopsGraph = _FakeGraph
     NPUGraph = _FakeGraph
+    SUPAGraph = _FakeGraph
     default_generators = ("gen0",)
 
     def __init__(self, available=True, fp16=True, bf16=True):
@@ -430,6 +444,7 @@ class _FakeAccelerator:
         self._bf16 = bf16
         self.amp = "amp"
         self.mstx = _FakeMstx()
+        self.brtx = _FakeBrtx()
 
     def is_available(self):
         return self._available
@@ -603,6 +618,8 @@ class TestMockedVendorPlatforms(unittest.TestCase):
         visible_env,
         graph_ctor_name,
         extra_modules=None,
+        triton_supported=None,
+        range_expected=(("nvtx_range", "msg"), ("nvtx_push", "msg"), "nvtx_pop"),
     ):
         module = __import__(module_path, fromlist=[class_name])
         platform_cls = getattr(module, class_name)
@@ -673,9 +690,9 @@ class TestMockedVendorPlatforms(unittest.TestCase):
             self.assertTrue(platform.is_bf16_supported())
             self.assertEqual(platform.supported_dtypes(), ["float", "half", "bf16"])
             self.assertEqual(platform.amp(), "amp")
-            self.assertEqual(platform.range("msg"), ("nvtx_range", "msg"))
-            self.assertEqual(platform.range_push("msg"), ("nvtx_push", "msg"))
-            self.assertEqual(platform.range_pop(), "nvtx_pop")
+            self.assertEqual(platform.range("msg"), range_expected[0])
+            self.assertEqual(platform.range_push("msg"), range_expected[1])
+            self.assertEqual(platform.range_pop(), range_expected[2])
             graph = platform.create_graph()
             if graph is None:
                 graph = _FakeGraph()
@@ -701,7 +718,7 @@ class TestMockedVendorPlatforms(unittest.TestCase):
             self.assertEqual(platform.visible_devices_envs(), [visible_env])
             self.assertEqual(env[visible_env], "1,3")
             self.assertIsNone(platform.lazy_call(lambda: None))
-            self.assertIsNone(platform.is_triton_supported())
+            self.assertEqual(platform.is_triton_supported(), triton_supported)
             self.assertIsNone(platform.get_compile_backend())
             self.assertIsNone(platform.set_compile_backend("inductor"))
             self.assertIsNone(platform.temperature())
@@ -710,6 +727,7 @@ class TestMockedVendorPlatforms(unittest.TestCase):
             self.assertIsNone(platform.clock_rate())
 
             accelerator._available = False
+            accelerator._bf16 = False
             self.assertFalse(platform.is_fp16_supported())
             self.assertFalse(platform.is_bf16_supported())
 
@@ -748,6 +766,22 @@ class TestMockedVendorPlatforms(unittest.TestCase):
             "TXDA_VISIBLE_DEVICES",
             "CUDAGraph",
             extras,
+        )
+
+    def test_supa_platform_wrapper_contract_with_mock_backend(self):
+        def extras(accelerator):
+            return {"torch_supa": types.SimpleNamespace(supa=accelerator)}
+
+        self._exercise_accelerator_platform(
+            "megatron.plugin.platform.platform_supa",
+            "PlatformSUPA",
+            "supa",
+            "supa",
+            "SUPA_VISIBLE_DEVICES",
+            "SUPAGraph",
+            extras,
+            triton_supported=False,
+            range_expected=(("range", "msg"), ("push", "msg"), "pop"),
         )
 
     def test_npu_platform_wrapper_contract_with_mock_backend(self):
@@ -1481,6 +1515,33 @@ class TestKunLunXinDeviceContract(unittest.TestCase):
                 platform_manager, "cur_platform", self.platform
             ):
                 self.assertEqual(decorators._get_preferred_vendor(), "kunlunxin")
+
+
+class TestSupaDeviceContract(unittest.TestCase):
+    """Pin the supa platform device contract.
+
+    Biren SUPA is an independent torch device type: torch_supa renames
+    PrivateUse1 to 'supa', so tensors report .device.type == 'supa'.
+    transfer_to_supa patches torch.cuda so fl core's hardcoded torch.cuda.*
+    call sites resolve to the SUPA device. SUPA uses 'supa' for both:
+    platform_name() == 'supa' is the vendor identity / override key, and
+    device_name() == 'supa' is the torch device type.
+    """
+
+    def setUp(self):
+        from megatron.plugin.platform.platform_supa import PlatformSUPA
+
+        self.platform = PlatformSUPA()
+
+    def test_platform_name_is_vendor_identity(self):
+        """platform_name() is the registry and override-registry key."""
+        self.assertEqual(self.platform.platform_name(), "supa")
+        self.assertEqual(self.platform._name, "supa")
+
+    def test_device_name_is_supa(self):
+        """device_name() is the native torch device type 'supa' (not 'cuda')."""
+        self.assertEqual(self.platform.device_name(), "supa")
+        self.assertEqual(self.platform.device_name(0), "supa:0")
 
 
 if __name__ == "__main__":
