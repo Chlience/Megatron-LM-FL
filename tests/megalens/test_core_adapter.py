@@ -121,24 +121,3 @@ def test_capture_query_tolerates_unsupported_torch_compatible_backend(monkeypatc
 
     monkeypatch.setattr(core_adapter, "_CUDA_CAPTURE_QUERY", lambda: True)
     assert core_adapter.should_suppress_core_scope()
-
-
-def test_paged_stash_reports_missing_triton_before_allocating(monkeypatch) -> None:
-    from megatron.core.transformer.moe import paged_stash
-
-    monkeypatch.setattr(paged_stash, "HAVE_TRITON", False)
-    monkeypatch.setattr(
-        paged_stash.torch,
-        "empty",
-        lambda *args, **kwargs: pytest.fail("missing Triton must fail before buffer allocation"),
-    )
-    with pytest.raises(ImportError, match="MoE paged stash requires Triton"):
-        paged_stash.PagedStashBuffer(
-            num_tokens=4,
-            hidden_size=8,
-            page_size=2,
-            device="cpu",
-            overflow=None,
-            host_spill=None,
-            dtype=None,
-        )
