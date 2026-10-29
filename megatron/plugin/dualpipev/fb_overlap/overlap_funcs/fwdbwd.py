@@ -36,7 +36,6 @@ from megatron.plugin.dualpipev.fb_overlap.modules.utils import (
 )
 
 from megatron.plugin.platform import get_platform
-
 cur_platform = get_platform()
 
 
