@@ -8,7 +8,6 @@ from typing import Callable, List, Optional, Tuple
 import torch
 
 from megatron.core import parallel_state
-
 ######## FlagScale Begin ########
 from megatron.plugin.platform import get_platform
 
@@ -611,7 +610,9 @@ def hybrid_context_parallel_forward_backward(
                 current_microbatch += 1
                 total_num_tokens += num_tokens.item()
                 if not forward_only:
-                    backward_step(input_tensor, output_tensor, output_tensor_grad, config)
+                    backward_step(
+                        input_tensor, output_tensor, output_tensor_grad, config
+                    )
 
             # Create a barrier at end of each group.
             # This barrier ensures that all ranks are prepared to change assigned CP group sizes and
